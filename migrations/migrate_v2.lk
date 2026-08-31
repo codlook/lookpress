@@ -1,0 +1,98 @@
+// Phase 1 Step 2 — migrate v1 (pages/posts) → v2 versioned content core.
+// Re-renders body_html from body_md (option B) and reports any diff vs the stored
+// v1 body_html (the golden-gate check, migration version). Zero diff = clean.
+use db;
+use "lib/migrate.lk";
+use "lib/markdown.lk";
+use json;
+use date;
+use type;
+use string;
+
+$c = db::connect(env("DB_DSN"));
+
+// ── v2 schema ───────────────────────────────────────────────────────────────
+$migrations = [
+    ["id" => "v2_0001_content", "create_table" => "content", "columns" => [
+        "id"            => "pk",
+        "type"          => "string(40)",
+        "slug"          => "string(200)",
+        "lang"          => "string(8) default=tr",
+        "status"        => "string(20) default=draft",
+        "current_rev"   => "int default=0",
+        "published_rev" => "int default=0",
+        "created_at"    => "int default=0",
+        "updated_at"    => "int default=0"
+    ]],
+    ["id" => "v2_0002_revisions", "create_table" => "revisions", "columns" => [
+        "id"          => "pk",
+        "content_id"  => "int",
+        "rev_no"      => "int",
+        "title"       => "string(200)",
+        "body_md"     => "text",
+        "body_html"   => "text",
+        "fields_json" => "text",
+        "author_id"   => "int default=0",
+        "created_at"  => "int default=0",
+        "note"        => "string(200)"
+    ]],
+    ["id" => "v2_0003_types", "create_table" => "content_types", "columns" => [
+        "id"          => "pk",
+        "slug"        => "string(40) unique",
+        "label"       => "string(80)",
+        "url_pattern" => "string(120)",
+        "fields_json" => "text"
+    ]]
+];
+migrate_run($c, $migrations);
+// Composite uniqueness: a slug is unique per (lang, type) — a page and a post may
+// share a slug (different URL namespaces). migrate has no composite-unique DSL, so
+// create it directly.
+db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_lang_type_slug ON content(lang, type, slug)", []);
+
+// ── seed built-in types ─────────────────────────────────────────────────────
+function seed_type($c, $slug, $label, $url, $fields) {
+    $ex = db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug]);
+    if (count($ex) == 0) {
+        db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES (?, ?, ?, ?)",
+            [$slug, $label, $url, json::encode($fields)]);
+    }
+}
+$common = [
+    ["name" => "title", "type" => "text",     "required" => true],
+    ["name" => "body",  "type" => "markdown", "required" => false]
+];
+seed_type($c, "page", "Page", "/{slug}",       $common);
+seed_type($c, "post", "Post", "/blog/{slug}",  $common);
+
+// ── migrate rows + diff report ──────────────────────────────────────────────
+function migrate_rows($c, $type, $sql, $ts_field) {
+    $rows = db::query($c, $sql, []);
+    $diffs = 0;
+    foreach ($rows as $r) {
+        $ts = type::to_int($r[$ts_field]);
+        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, 'tr', ?, ?, ?)",
+            [$type, $r["slug"], $r["status"], $ts, $ts]);
+        $cid = db::last_id($c);
+        $new_html = markdown_to_html($r["body"]);
+        db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, '{}', 0, ?, 'migrated from v1')",
+            [$cid, $r["title"], $r["body"], $new_html, $ts]);
+        $rid = db::last_id($c);
+        $prev = 0;
+        if ($r["status"] == "published") { $prev = $rid; }
+        db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $cid]);
+        // golden-gate diff: stored v1 body_html vs freshly re-rendered
+        if ($r["body_html"] != $new_html) {
+            $diffs = $diffs + 1;
+            print("  DIFF  " . $type . "/" . $r["slug"] . "  (old " . string::length($r["body_html"]) . "b vs new " . string::length($new_html) . "b)\n");
+        }
+    }
+    print("  " . $type . ": migrated " . count($rows) . ", body_html diffs " . $diffs . "\n");
+    return $diffs;
+}
+
+print("=== migrating v1 -> v2 ===\n");
+$d1 = migrate_rows($c, "page", "SELECT slug, title, body, body_html, status, updated_at FROM pages", "updated_at");
+$d2 = migrate_rows($c, "post", "SELECT slug, title, body, body_html, status, published_at FROM posts", "published_at");
+$total_diffs = $d1 + $d2;
+print("=== TOTAL body_html diffs: " . $total_diffs . " (0 = clean golden-gate migration) ===\n");
