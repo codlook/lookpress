@@ -153,6 +153,44 @@ route("GET", "/admin", function() {
     return response::html(view("admin_types.html", ["types" => $types]));
 });
 
+// ── type-admin: create a content type from the admin (closes Step 3's gate) ──
+route("GET", "/admin/types/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    return response::html(view("admin_type_def.html", [
+        "slug" => "", "label" => "", "url_pattern" => "/{slug}",
+        "fields" => "[\n  {\"name\":\"title\",\"type\":\"text\",\"required\":true},\n  {\"name\":\"body\",\"type\":\"markdown\"}\n]",
+        "errors" => []
+    ]));
+});
+route("POST", "/admin/types/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $slug = string::trim(request::post("slug"));
+    $label = string::trim(request::post("label"));
+    $url = string::trim(request::post("url_pattern"));
+    $fields_raw = request::post("fields");
+    $errs = [];
+    if (!string::regex_match($slug, "^[a-z][a-z0-9_]*$")) { $errs = array::push($errs, "slug must be lowercase letters/digits/underscore, starting with a letter"); }
+    if (!string::regex_match($url, "\\{slug\\}")) { $errs = array::push($errs, "url_pattern must contain {slug}"); }
+    $fields = json::decode($fields_raw);
+    if ($fields == null) { $errs = array::push($errs, "fields must be valid JSON"); }
+    else {
+        // every type must define title + body (the render-on-save convention)
+        $has_title = false; $has_body = false;
+        foreach ($fields as $f) {
+            if ($f["name"] == "title") { $has_title = true; }
+            if ($f["name"] == "body") { $has_body = true; }
+        }
+        if (!$has_title || !$has_body) { $errs = array::push($errs, "fields must include a 'title' and a 'body'"); }
+    }
+    if (count(db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug])) > 0) { $errs = array::push($errs, "a type with that slug already exists"); }
+    if (count($errs) > 0) {
+        return response::html(view("admin_type_def.html", ["slug" => $slug, "label" => $label, "url_pattern" => $url, "fields" => $fields_raw, "errors" => $errs]));
+    }
+    db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES (?, ?, ?, ?)", [$slug, $label, $url, json::encode($fields)]);
+    return response::redirect("/admin/type/" . $slug);
+});
+
 // ── GENERIC admin CRUD — ONE handler set for EVERY type (the type engine) ────
 route("GET", "/admin/type/{type}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -263,15 +301,26 @@ function render_published($type, $slug) {
 // use()) on purpose: a VM bug wraps a `use()`-captured loop-local in a single-element
 // array at request time (see FRICTION_phase1.md #3, core candidate); auto-capture is
 // clean. Sorted by url_pattern length DESC so the bare "/{slug}" catch-all is LAST.
-// Built-in type URL patterns, registered directly. Two isolated findings block
-// DB-driven dynamic registration here (see FRICTION_phase1.md #3):
-//   (a) db::query at the setup/route-collection pass returns 0 rows (the DB is not
-//       queryable during route registration) — so routes can't be read from
-//       content_types at startup; a config-driven source (a types.json read at setup)
-//       or a request-time dispatcher is the design answer.
-//   (b) a VM bug array-wraps a use()-captured loop-local — auto-capture avoids it.
-// So built-in patterns are registered directly; dynamic per-type routing = a design
-// step (config-driven), not just a code tweak. "/{slug}" page catch-all is LAST.
-route("GET", "/products/{slug}", function() { return render_published("product", request::param("slug")); });
-route("GET", "/blog/{slug}",     function() { return render_published("post",    request::param("slug")); });
-route("GET", "/{slug}",          function() { return render_published("page",    request::param("slug")); });
+// ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────
+// A new type auto-routes with NO restart: url_patterns are resolved from the DB at
+// REQUEST time (where db:: works — the setup pass does not, see FRICTION #3a), and
+// the closures take no use()-captured loop-local (avoiding the VM wrap, #3b).
+// These two generic patterns MUST be the LAST routes registered — every specific
+// route (/admin, /api, /media, /preview, ...) is registered above and wins by
+// first-match. (Route-shadow contract, from the reference app's Slice 1.)
+//
+//   1-segment  /{a}      → the type whose url_pattern is "/{slug}" (e.g. page), slug=a
+//   2-segment  /{a}/{b}  → the type whose url_pattern is "/{a}/{slug}"  (e.g. post,
+//                          product: /blog/{slug}, /products/{slug}), slug=b
+route("GET", "/{a}", function() {
+    $c = conn();
+    $t = db::query($c, "SELECT slug FROM content_types WHERE url_pattern = '/{slug}'", []);
+    if (count($t) == 0) { return response::status(404, view("notfound.html", [])); }
+    return render_published($t[0]["slug"], request::param("a"));
+});
+route("GET", "/{a}/{b}", function() {
+    $c = conn();
+    $t = db::query($c, "SELECT slug FROM content_types WHERE url_pattern = ?", ["/" . request::param("a") . "/{slug}"]);
+    if (count($t) == 0) { return response::status(404, view("notfound.html", [])); }
+    return render_published($t[0]["slug"], request::param("b"));
+});

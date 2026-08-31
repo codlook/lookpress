@@ -1,0 +1,13 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>New content type <a class="btn" href="/admin">Types</a></h2>
+{#each $errors as $e}<p class="error">{$e}</p>{/each}
+<form method="post" action="/admin/types/new">
+<label>Slug (used in code + URLs) <input name="slug" value="{$slug}" placeholder="recipe" required></label>
+<label>Label <input name="label" value="{$label}" placeholder="Recipe" required></label>
+<label>URL pattern (must contain <code>{slug}</code>) <input name="url_pattern" value="{$url_pattern}" placeholder="/recipes/{slug}" required></label>
+<label>Fields (JSON — must include title + body)<textarea name="fields" rows="12">{$fields}</textarea></label>
+<button type="submit">Create type</button>
+</form>
+<p class="muted">Field types: text · textarea · markdown · int · decimal · bool · date · select (with <code>choices</code>) · relation (with <code>to</code>).</p>
+{/block}
