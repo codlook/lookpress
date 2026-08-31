@@ -1,15 +1,14 @@
 # LookPress
-n**A Look-native web application & content platform.** Small core, static-first, API-first; measured, not promised.
 
-A **static-first, version-controlled** **site platform** built on
-[LOOK](https://github.com/codlook/look).
+**A Look-native web application & content platform.** Small core, static-first, API-first;
+measured, not promised. Built on [LOOK](https://github.com/codlook/look).
 
 Not "WordPress but faster," and not a publishing engine — a **platform**: one install can become a
 blog, a store, a membership site, or a multilingual corporate site by adding extensions, **without
-touching the core.** WordPress's real power was never speed; it was that transformation. LOOK CMS
+touching the core.** WordPress's real power was never speed; it was that transformation. LookPress
 matches it and targets WordPress's six *structural* loads — not its feature list:
 
-| WordPress's structural load | LOOK CMS's structural answer |
+| WordPress's structural load | LookPress's structural answer |
 |---|---|
 | Every request renders (PHP + MySQL + cache + CDN, invalidation hell) | **Static-first** — publish generates HTML; dynamic islands stay live |
 | Extensions run arbitrary in-process code (the source of most WP hacks) | Built-in app services + **declared, audited** extension manifests; hard enforcement is the roadmap flagship (honest label until proven) |
