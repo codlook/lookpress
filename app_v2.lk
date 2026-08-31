@@ -258,11 +258,13 @@ function render_published($type, $slug) {
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
 }
-// NOTE: route() must be a direct top-level statement — a route() inside a loop is
-// not collected by the setup pass (a real finding; see FRICTION). So built-in type
-// URL patterns are registered directly; a per-type dynamic registration mechanism
-// (so a NEW type's url_pattern auto-routes) is the next refinement.
-// The /{slug} page catch-all MUST be registered LAST.
+// Built-in type URL patterns, registered directly. NOTE: dynamic per-type routing
+// (a foreach over content_types registering each url_pattern) is BLOCKED by a real
+// web-runtime bug, isolated here: in lk-fcgi, a closure that captures an assoc-indexed
+// loop value (`$t = $pt["slug"]; use($t)`) receives it ARRAY-WRAPPED (`["product"]`
+// not `"product"`) at request time — so the type lookup fails. Direct routes with
+// literal args are unaffected. See FRICTION_phase1.md #3 (core candidate). The
+// "/{slug}" page catch-all MUST be registered LAST.
 route("GET", "/products/{slug}", function() { return render_published("product", request::param("slug")); });
 route("GET", "/blog/{slug}",     function() { return render_published("post",    request::param("slug")); });
 route("GET", "/{slug}",          function() { return render_published("page",    request::param("slug")); });

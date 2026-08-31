@@ -1,0 +1,9 @@
+use json;
+function dbg($v) { return response::text(json::encode($v)); }
+$types = [["slug" => "product", "url_pattern" => "/p/{slug}"]];
+foreach ($types as $pt) {
+    $ts = $pt["slug"];
+    route("GET", "/captured", function() use ($ts) { return dbg($ts); });
+}
+$plain = "product";
+route("GET", "/plain", function() use ($plain) { return dbg($plain); });
