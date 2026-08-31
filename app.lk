@@ -1,0 +1,317 @@
+// app.lk — a tiny CMS reference app (Slice 1: pages + admin). Serve it:
+//   lk setup.lk fresh
+//   lk-fcgi --mode http --port 8080 app.lk
+//
+// One content type (pages), Markdown body, a catch-all /{slug} public route, and a
+// password-gated admin (list / create / edit / delete, draft <-> publish).
+// The admin password is env ADMIN_PASSWORD (default "changeme" — set your own).
+
+use db;
+use template;
+use session;
+use string;
+use type;
+use array;
+use crypto;
+use date;
+use file;
+use "lib/markdown.lk";
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
+
+function view($tpl, $data) {
+    return template::render("themes/" . env("THEME", "default") . "/" . $tpl, $data);
+}
+
+// Auth is a single session flag set by the login form. One writer (the admin),
+// so this is deliberately minimal — RBAC is a later slice.
+function is_admin() {
+    session::start();
+    return session::get("admin") == "1";
+}
+
+// Render the page editor with the current status pre-selected in the <select>.
+function edit_view($page, $action, $heading) {
+    $draft_sel = " selected";
+    $pub_sel   = "";
+    if ($page["status"] == "published") { $draft_sel = ""; $pub_sel = " selected"; }
+    return response::html(view("admin_edit.html", [
+        "page"      => $page,
+        "action"    => $action,
+        "heading"   => $heading,
+        "draft_sel" => $draft_sel,
+        "pub_sel"   => $pub_sel
+    ]));
+}
+
+// ── public ────────────────────────────────────────────────────────────────────
+
+// Home: list published pages.
+route("GET", "/", function() {
+    $c = conn();
+    $pages = db::query($c, "SELECT slug, title FROM pages WHERE status = 'published' ORDER BY title", []);
+    return response::html(view("home.html", ["pages" => $pages]));
+});
+
+// ── admin (registered BEFORE the catch-all so /admin wins over /{slug}) ─────────
+
+route("GET", "/admin/login", function() {
+    return response::html(view("login.html", ["error" => ""]));
+});
+
+route("POST", "/admin/login", function() {
+    $pw = request::post("password");
+    // Timing-safe compare — never a plain ==, even for a single password.
+    if (crypto::constant_compare($pw, env("ADMIN_PASSWORD", "changeme"))) {
+        session::start();
+        session::regenerate();          // new session id on privilege change
+        session::set("admin", "1");
+        return response::redirect("/admin");
+    }
+    return response::html(view("login.html", ["error" => "Wrong password."]));
+});
+
+route("GET", "/admin/logout", function() {
+    session::start();
+    session::destroy();
+    return response::redirect("/admin/login");
+});
+
+// Admin dashboard: every page, draft and published.
+route("GET", "/admin", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $pages = db::query($c, "SELECT id, slug, title, status FROM pages ORDER BY updated_at DESC, id DESC", []);
+    return response::html(view("admin_list.html", ["pages" => $pages]));
+});
+
+route("GET", "/admin/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    return edit_view(["id" => "", "slug" => "", "title" => "", "body" => "", "status" => "draft"],
+        "/admin/new", "New page");
+});
+
+route("POST", "/admin/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $body = request::post("body");
+    db::exec($c, "INSERT INTO pages (slug, title, body, body_html, status, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [
+        string::trim(request::post("slug")),
+        request::post("title"),
+        $body,
+        markdown_to_html($body),      // render-on-save — serving never re-renders
+        request::post("status"),
+        date::timestamp()
+    ]);
+    return response::redirect("/admin");
+});
+
+route("GET", "/admin/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT id, slug, title, body, status FROM pages WHERE id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, "No such page"); }
+    return edit_view($rows[0], "/admin/edit/" . $rows[0]["id"], "Edit page");
+});
+
+route("POST", "/admin/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $body = request::post("body");
+    db::exec($c, "UPDATE pages SET slug = ?, title = ?, body = ?, body_html = ?, status = ?, updated_at = ? WHERE id = ?", [
+        string::trim(request::post("slug")),
+        request::post("title"),
+        $body,
+        markdown_to_html($body),
+        request::post("status"),
+        date::timestamp(),
+        request::param("id")
+    ]);
+    return response::redirect("/admin");
+});
+
+route("POST", "/admin/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    db::exec($c, "DELETE FROM pages WHERE id = ?", [request::param("id")]);
+    return response::redirect("/admin");
+});
+
+// ── blog (posts) ──────────────────────────────────────────────────────────────
+
+function post_edit_view($post, $action, $heading) {
+    $draft_sel = " selected";
+    $pub_sel   = "";
+    if ($post["status"] == "published") { $draft_sel = ""; $pub_sel = " selected"; }
+    return response::html(view("admin_edit.html", [
+        "page" => $post, "action" => $action, "heading" => $heading,
+        "draft_sel" => $draft_sel, "pub_sel" => $pub_sel
+    ]));
+}
+
+// Public blog index — newest first, paginated.
+route("GET", "/blog", function() {
+    $c = conn();
+    $per = 5;
+    $page = type::to_int(request::get("page") ?? "1");
+    if ($page < 1) { $page = 1; }
+    $offset = ($page - 1) * $per;
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM posts WHERE status = 'published'", [])[0]["n"]);
+    $posts = db::query($c, "SELECT slug, title FROM posts WHERE status = 'published' ORDER BY published_at DESC, id DESC LIMIT ? OFFSET ?", [$per, $offset]);
+    return response::html(view("blog.html", [
+        "posts"    => $posts,
+        "page"     => $page,
+        "prev"     => $page - 1,
+        "next"     => $page + 1,
+        "has_prev" => $page > 1,
+        "has_next" => ($offset + $per) < $total
+    ]));
+});
+
+// Public post detail.
+route("GET", "/blog/{slug}", function() {
+    $c = conn();
+    $rows = db::query($c, "SELECT title, body_html FROM posts WHERE slug = ? AND status = 'published'", [request::param("slug")]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    // Serve the HTML rendered at save time — no per-request Markdown pass.
+    return response::html(view("post.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
+});
+
+route("GET", "/admin/posts", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $posts = db::query($c, "SELECT id, slug, title, status FROM posts ORDER BY published_at DESC, id DESC", []);
+    return response::html(view("admin_posts.html", ["posts" => $posts]));
+});
+
+route("GET", "/admin/posts/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    return post_edit_view(["id" => "", "slug" => "", "title" => "", "body" => "", "status" => "draft"],
+        "/admin/posts/new", "New post");
+});
+
+route("POST", "/admin/posts/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $body = request::post("body");
+    db::exec($c, "INSERT INTO posts (slug, title, body, body_html, status, published_at) VALUES (?, ?, ?, ?, ?, ?)", [
+        string::trim(request::post("slug")), request::post("title"),
+        $body, markdown_to_html($body), request::post("status"), date::timestamp()
+    ]);
+    return response::redirect("/admin/posts");
+});
+
+route("GET", "/admin/posts/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT id, slug, title, body, status FROM posts WHERE id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, "No such post"); }
+    return post_edit_view($rows[0], "/admin/posts/edit/" . $rows[0]["id"], "Edit post");
+});
+
+route("POST", "/admin/posts/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $body = request::post("body");
+    db::exec($c, "UPDATE posts SET slug = ?, title = ?, body = ?, body_html = ?, status = ? WHERE id = ?", [
+        string::trim(request::post("slug")), request::post("title"),
+        $body, markdown_to_html($body), request::post("status"), request::param("id")
+    ]);
+    return response::redirect("/admin/posts");
+});
+
+route("POST", "/admin/posts/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    db::exec($c, "DELETE FROM posts WHERE id = ?", [request::param("id")]);
+    return response::redirect("/admin/posts");
+});
+
+// ── media library ───────────────────────────────────────────────────────────
+
+// Allowed image types. SVG is deliberately OFF: an inline-served SVG can carry
+// script, so it would be an XSS vector the moment media is multi-author.
+function media_mimes() { return ["image/png", "image/jpeg", "image/gif", "image/webp"]; }
+
+route("GET", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    // Newest first — the media table carries created_at; file::list has no mtime.
+    $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+    return response::html(view("admin_media.html", ["items" => $items, "error" => ""]));
+});
+
+route("POST", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    // request::file returns null when no file was sent, but THROWS when the file is
+    // present-but-rejected (wrong MIME / too big) — so wrap it to treat both as "no
+    // valid upload" and show one message. (Contract asymmetry — see FRICTION.md.)
+    $f = null;
+    try {
+        $f = request::file("file", ["max_size" => 5242880, "allow_mime" => media_mimes()]);
+    } catch ($e) {
+        $f = null;
+    }
+    if ($f == null) {
+        $c = conn();
+        $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+        return response::html(view("admin_media.html", ["items" => $items,
+            "error" => "No file, or type not allowed (png / jpeg / gif / webp, max 5 MB)."]));
+    }
+    // file::store creates the dir, dedupes by sha256, returns {name, sha256, mime, ...}.
+    $s = file::store($f, "media");
+    $c = conn();
+    // sha_name is unique — a re-upload of the same bytes maps to the same row.
+    $exists = db::query($c, "SELECT id FROM media WHERE sha_name = ?", [$s["name"]]);
+    if (count($exists) == 0) {
+        db::exec($c, "INSERT INTO media (sha_name, original, mime, size, created_at) VALUES (?, ?, ?, ?, ?)",
+            [$s["name"], $f["filename"], $s["mime"], $f["size"], date::timestamp()]);
+    }
+    return response::redirect("/admin/media");
+});
+
+route("POST", "/admin/media/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT sha_name FROM media WHERE id = ?", [request::param("id")]);
+    if (count($rows) > 0) {
+        // Remove the file, then the row. (We do NOT check whether a page still
+        // embeds it — like WordPress, deleting media can leave a broken image.)
+        $path = file::upload_dir() . "/media/" . $rows[0]["sha_name"];
+        if (file::exists($path)) { file::remove($path); }
+        db::exec($c, "DELETE FROM media WHERE id = ?", [request::param("id")]);
+    }
+    return response::redirect("/admin/media");
+});
+
+// Serve an uploaded file. Public. The {name} is a sha256 hex + extension, so a
+// strict hex/ext whitelist rejects any traversal or surprise input for free.
+route("GET", "/media/{name}", function() {
+    $name = request::param("name");
+    if (!string::regex_match($name, "^[0-9a-f]{32}\\.[a-z0-9]{2,5}$")) {
+        return response::status(404, "Not found");
+    }
+    $c = conn();
+    $rows = db::query($c, "SELECT mime FROM media WHERE sha_name = ?", [$name]);
+    if (count($rows) == 0) { return response::status(404, "Not found"); }
+    $path = file::upload_dir() . "/media/" . $name;
+    if (!file::exists($path)) { return response::status(404, "Not found"); }
+    $bytes = file::read($path);
+    // Set the Content-Type AFTER the body — response::text sets text/plain, and a
+    // header set after the body wins (the QR-menu lesson). Bytes must round-trip.
+    response::text($bytes);
+    response::header("Content-Type", $rows[0]["mime"]);
+    response::header("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+});
+
+// ── public catch-all (LAST — every non-admin path is a page slug lookup) ────────
+route("GET", "/{slug}", function() {
+    $c = conn();
+    $rows = db::query($c, "SELECT title, body_html FROM pages WHERE slug = ? AND status = 'published'", [request::param("slug")]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    // Serve the HTML rendered at save time (render-on-save). It is emitted RAW
+    // ({!$content}) on purpose; markdown_to_html already escaped raw HTML in the source.
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
+});

@@ -1,0 +1,16 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Pages <a class="btn" href="/admin/new">+ New</a> <a class="btn" href="/admin/posts">Posts</a> <a class="btn" href="/admin/media">Media</a></h2>
+<p class="muted"><a href="/admin/logout">Log out</a></p>
+<table>
+<tr><th>Title</th><th>Slug</th><th>Status</th><th></th></tr>
+{#each $pages as $p}
+<tr>
+<td><a href="/admin/edit/{$p.id}">{$p.title}</a></td>
+<td class="muted">/{$p.slug}</td>
+<td>{$p.status}</td>
+<td><form class="inline" method="post" action="/admin/delete/{$p.id}" onsubmit="return confirm('Delete this page?')"><button class="del" type="submit">Delete</button></form></td>
+</tr>
+{/each}
+</table>
+{/block}

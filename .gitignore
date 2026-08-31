@@ -1,0 +1,7 @@
+*.db
+*.db-*
+.look_cache/
+logs/
+uploads/
+build/
+build-next/

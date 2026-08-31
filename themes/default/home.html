@@ -1,0 +1,7 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Pages</h2>
+<ul class="pages">
+{#each $pages as $p}<li><a href="/{$p.slug}">{$p.title}</a></li>{/each}
+</ul>
+{/block}

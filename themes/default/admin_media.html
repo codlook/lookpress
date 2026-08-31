@@ -1,0 +1,22 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Media <a class="btn" href="/admin">&larr; Pages</a></h2>
+{#if $error}<p class="error">{$error}</p>{/if}
+<form method="post" action="/admin/media" enctype="multipart/form-data">
+<label>Upload an image (png / jpeg / gif / webp, max 5 MB)
+<input type="file" name="file" accept="image/png,image/jpeg,image/gif,image/webp" required></label>
+<button type="submit">Upload</button>
+</form>
+<div class="media-grid">
+{#each $items as $m}
+<figure class="media-item">
+<img src="/media/{$m.sha_name}" alt="{$m.original}">
+<figcaption>
+<div class="muted">{$m.original}</div>
+<code>![{$m.original}](/media/{$m.sha_name})</code>
+<form class="inline" method="post" action="/admin/media/delete/{$m.id}" onsubmit="return confirm('Delete this image?')"><button class="del" type="submit">Delete</button></form>
+</figcaption>
+</figure>
+{/each}
+</div>
+{/block}

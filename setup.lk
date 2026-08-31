@@ -1,0 +1,85 @@
+// setup.lk — create the schema and seed a demo page.
+//   lk setup.lk migrate  → create tables
+//   lk setup.lk seed     → insert a demo page
+//   lk setup.lk fresh    → drop everything, re-migrate, seed (dev only)
+//
+// DB_DSN defaults to a local SQLite file, so it runs with no database server.
+
+use db;
+use "lib/migrate.lk";
+use "lib/markdown.lk";   // render-on-save: seed rows store rendered HTML too
+
+$migrations = [
+    // body = Markdown source (what the admin edits); body_html = rendered HTML
+    // (produced once at save — render-on-save, so serving a page never re-renders).
+    ["id" => "0001_pages", "create_table" => "pages", "columns" => [
+        "id"         => "pk",
+        "slug"       => "string(200) unique",
+        "title"      => "string(200)",
+        "body"       => "text",
+        "body_html"  => "text",
+        "status"     => "string(20) default=draft",
+        "updated_at" => "int default=0"
+    ]],
+    // Media library. file::store names files by sha256 (dedup) — so we keep the
+    // original name and the upload date here; file::list alone loses both.
+    ["id" => "0002_media", "create_table" => "media", "columns" => [
+        "id"         => "pk",
+        "sha_name"   => "string(80) unique",
+        "original"   => "string(255)",
+        "mime"       => "string(80)",
+        "size"       => "int default=0",
+        "created_at" => "int default=0"
+    ]],
+    // Blog posts — chronological content (published_at drives the /blog order).
+    ["id" => "0003_posts", "create_table" => "posts", "columns" => [
+        "id"           => "pk",
+        "slug"         => "string(200) unique",
+        "title"        => "string(200)",
+        "body"         => "text",
+        "body_html"    => "text",
+        "status"       => "string(20) default=draft",
+        "published_at" => "int default=0"
+    ]]
+];
+
+function seed($conn) {
+    $body = "# Welcome to LOOK CMS\n\nThis page is stored in the database as **Markdown** and rendered by a theme — no code change to add another page.\n\n- Write in Markdown\n- Publish or keep as draft\n- The public URL is the page **slug**\n\nEdit or delete it from the [admin](/admin).\n";
+    db::exec($conn, "INSERT INTO pages (slug, title, body, body_html, status, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        ["welcome", "Welcome", $body, markdown_to_html($body), "published", 0]);
+    // Seed 7 published posts so /blog paginates (per-page 5 → two pages).
+    $i = 1;
+    while ($i <= 7) {
+        $pb = "This is **post " . $i . "**, written in Markdown.\n\nEvery post is a row in the `posts` table.";
+        db::exec($conn, "INSERT INTO posts (slug, title, body, body_html, status, published_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ["post-" . $i, "Post number " . $i, $pb, markdown_to_html($pb), "published", $i]);
+        $i = $i + 1;
+    }
+}
+
+$a = args();
+$cmd = "migrate";
+if (count($a) > 0) { $cmd = $a[0]; }
+$conn = db::connect(env("DB_DSN", "sqlite://cms.db"));
+
+if ($cmd == "migrate") {
+    $applied = migrate_run($conn, $migrations);
+    print("migrated: " . count($applied) . " migration(s)");
+} else {
+    if ($cmd == "seed") {
+        seed($conn);
+        print("seeded demo page (/welcome)");
+    } else {
+        if ($cmd == "fresh") {
+            db::exec($conn, "DROP TABLE IF EXISTS pages", []);
+            db::exec($conn, "DROP TABLE IF EXISTS media", []);
+            db::exec($conn, "DROP TABLE IF EXISTS posts", []);
+            db::exec($conn, "DROP TABLE IF EXISTS schema_migrations", []);
+            migrate_run($conn, $migrations);
+            seed($conn);
+            print("fresh: dropped, migrated, seeded");
+        } else {
+            print("usage: lk setup.lk [migrate | seed | fresh]");
+        }
+    }
+}

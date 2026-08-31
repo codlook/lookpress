@@ -1,0 +1,122 @@
+use string;
+use html;
+
+// markdown — practical Markdown -> HTML for LOOK. The whole input is HTML-escaped
+// first (safe by default: no raw HTML passes through), then a common subset is
+// rendered: headings, bold/italic, inline & fenced code, links, images, ordered
+// and unordered lists, blockquotes, horizontal rules and paragraphs. Best-effort,
+// like html_parser — LOOK has no full CommonMark parser.
+//
+// markdown_to_html($src)  -> string   rendered HTML
+// markdown_inline($text)  -> string   inline spans only (bold/italic/code/link/img)
+//
+// Security: because the source is escaped before rendering, injected <script> or
+// raw tags become inert text. Common dangerous URL schemes (javascript:, data:,
+// vbscript:) are neutralised in links. For fully untrusted input, still pass the
+// output through the `sanitize` module — regex rendering is best-effort.
+
+function markdown__descheme($html) {
+    $h = string::regex_replace($html, "(href|src)=\"[ ]*(javascript|data|vbscript):", "$1=\"#blocked:");
+    $h = string::regex_replace($h, "(href|src)=\"[ ]*(JAVASCRIPT|DATA|VBSCRIPT):", "$1=\"#blocked:");
+    return $h;
+}
+
+// Inline spans. Takes RAW text: it HTML-escapes first (so any raw markup becomes
+// inert), then renders spans. Note html::escape turns a backtick into &#96;, so
+// inline code is matched on that escaped form.
+function markdown_inline($t) {
+    $t = html::escape($t);
+    $t = string::regex_replace($t, "!\\[([^\\]]*)\\]\\(([^) ]+)\\)", "<img src=\"$2\" alt=\"$1\">");
+    $t = string::regex_replace($t, "\\[([^\\]]+)\\]\\(([^) ]+)\\)", "<a href=\"$2\">$1</a>");
+    $t = string::regex_replace($t, "\\*\\*([^*]+)\\*\\*", "<strong>$1</strong>");
+    $t = string::regex_replace($t, "__([^_]+)__", "<strong>$1</strong>");
+    $t = string::regex_replace($t, "\\*([^*]+)\\*", "<em>$1</em>");
+    $t = string::regex_replace($t, "&#96;(.+?)&#96;", "<code>$1</code>");
+    return markdown__descheme($t);
+}
+
+function markdown__is_ol($t) {
+    return string::regex_match($t, "^[0-9]+\\. ");
+}
+
+function markdown_to_html($src) {
+    // Work on RAW lines so block markers ('>', '#', '```') survive; text content
+    // is escaped where it is emitted (markdown_inline, or per-line inside a fence).
+    $lines = string::split($src, "\n");
+    $out = "";
+    $in_code = false;
+    $list = "";           // "", "ul" or "ol" — the open list, if any
+
+    foreach ($lines as $raw) {
+        $line = string::rtrim($raw);
+        $trimmed = string::trim($line);
+
+        // fenced code toggle (``` on its own line)
+        if (string::starts_with($trimmed, "```")) {
+            if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+            if ($in_code) { $out = $out . "</code></pre>\n"; $in_code = false; }
+            else { $out = $out . "<pre><code>"; $in_code = true; }
+            continue;
+        }
+        if ($in_code) { $out = $out . html::escape($line) . "\n"; continue; }
+
+        // blank line — close any open list, separate blocks
+        if (string::len($trimmed) == 0) {
+            if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+            continue;
+        }
+
+        // horizontal rule
+        if ($trimmed == "---" || $trimmed == "***") {
+            if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+            $out = $out . "<hr>\n";
+            continue;
+        }
+
+        // headings # .. ######
+        $hmatch = string::regex_match($trimmed, "^#{1,6} ");
+        if ($hmatch) {
+            if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+            $level = string::index_of($trimmed, " ");
+            $text = string::substr($trimmed, $level + 1);
+            $out = $out . "<h" . $level . ">" . markdown_inline(string::trim($text)) . "</h" . $level . ">\n";
+            continue;
+        }
+
+        // blockquote
+        if (string::starts_with($trimmed, "> ")) {
+            if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+            $out = $out . "<blockquote>" . markdown_inline(string::substr($trimmed, 2)) . "</blockquote>\n";
+            continue;
+        }
+
+        // unordered list item
+        if (string::starts_with($trimmed, "- ") || string::starts_with($trimmed, "* ")) {
+            if ($list != "ul") {
+                if ($list != "") { $out = $out . "</" . $list . ">\n"; }
+                $out = $out . "<ul>\n"; $list = "ul";
+            }
+            $out = $out . "<li>" . markdown_inline(string::substr($trimmed, 2)) . "</li>\n";
+            continue;
+        }
+
+        // ordered list item ("1. ")
+        if (markdown__is_ol($trimmed)) {
+            if ($list != "ol") {
+                if ($list != "") { $out = $out . "</" . $list . ">\n"; }
+                $out = $out . "<ol>\n"; $list = "ol";
+            }
+            $dot = string::index_of($trimmed, ". ");
+            $out = $out . "<li>" . markdown_inline(string::substr($trimmed, $dot + 2)) . "</li>\n";
+            continue;
+        }
+
+        // paragraph
+        if ($list != "") { $out = $out . "</" . $list . ">\n"; $list = ""; }
+        $out = $out . "<p>" . markdown_inline($trimmed) . "</p>\n";
+    }
+
+    if ($list != "") { $out = $out . "</" . $list . ">\n"; }
+    if ($in_code) { $out = $out . "</code></pre>\n"; }
+    return $out;
+}

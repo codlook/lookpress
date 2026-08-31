@@ -1,0 +1,493 @@
+use db;
+use string;
+use date;
+use array;
+use type;
+use file;
+
+// migrate — a tiny, honest schema-migration runner for LOOK.
+// No ORM, no magic: you pass an ordered list of migrations as plain data and
+// migrate_run applies the not-yet-applied ones inside a transaction, recording
+// each in a tracking table. SQL stays SQL — nothing is hidden.
+//
+// A migration is an assoc: ["id" => "0001_init", "up" => "CREATE TABLE ..."]
+//   id : unique, sortable identifier. Migrations are applied in array order.
+//   up : SQL to bring the schema forward. Multiple statements may be separated
+//        by ';' (each is run in turn).
+//
+// migrate_run($conn, $migrations)      -> [applied_id, ...]   newly applied, in order
+// migrate_rollback($conn, $migrations) -> id | ""             undo the last applied one
+// migrate_status($conn, $migrations)   -> [["id"=>.., "applied"=>bool], ...]
+// migrate_applied($conn)               -> [id, ...]            already-applied ids
+// migrate_cli($conn, $migrations)      -> (prints)  env MIGRATE_CMD = up|down|status
+//
+// A migration may also carry an optional "down" body for rollback:
+//   ["id"=>"0002_posts", "up"=>"CREATE TABLE posts (...)", "down"=>"DROP TABLE posts"]
+//
+// Terminal use (no artisan needed): put your migrations in a small .lk runner and
+// call migrate_cli; then MIGRATE_CMD=up|down|status lk migrate.lk.
+//
+// The tracking table (_look_migrations) is created on first use. Its DDL uses
+// only VARCHAR columns so the same code runs on MySQL, PostgreSQL and SQLite.
+
+function migrate__ensure($conn) {
+    db::exec($conn, "CREATE TABLE IF NOT EXISTS _look_migrations (id VARCHAR(255) PRIMARY KEY, applied_at VARCHAR(32))", []);
+}
+
+function migrate__is_applied($conn, $id) {
+    $n = db::col($conn, "SELECT COUNT(*) FROM _look_migrations WHERE id=?", [$id]);
+    return $n > 0;
+}
+
+// Normalise a migration body to a list of statements. A body is either one SQL
+// string, or an array of SQL strings for multiple statements — EXPLICIT, no ';'
+// parsing (a ';' inside a string literal or a trigger body must never split).
+function migrate__statements($body) {
+    if (type::is_array($body)) {
+        return $body;
+    }
+    return [$body];
+}
+
+// Run every statement in a body, skipping blank ones (so an empty "down" is a no-op).
+function migrate__exec_all($conn, $body) {
+    foreach (migrate__statements($body) as $stmt) {
+        if (string::len(string::trim($stmt)) > 0) {
+            db::exec($conn, $stmt, []);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Schema layer — DECLARATIVE schema for the common DDL, translated to the dialect
+// of the live DB (db::driver). Deliberately three operations only: create_table,
+// add_column, add_index. Everything else — other ALTERs, and every data migration
+// (UPDATE/backfill) — is written as raw "up" SQL, which is an EQUAL first-class path,
+// not a fallback. Schema for schema, SQL for data; both are normal.
+//
+// This same declarative table description is the metadata LookAdmin reads to build
+// its CRUD forms and tables — the concrete reason it exists, beyond portability.
+//
+// Column grammar: [name, type, size?, opts?]
+//   types:  pk string text int bigint bool float datetime date json
+//           (or a raw SQL type string as an escape hatch, e.g. "DECIMAL(10,2)")
+//   size:   integer, the VARCHAR length for "string"
+//   opts:   assoc — ["null"=>false, "unique"=>true, "default"=>...]
+
+function migrate__opt($opts, $key, $def) {
+    if (array::contains(array::keys($opts), $key)) {
+        return $opts[$key];
+    }
+    return $def;
+}
+
+function migrate__is_schema($m) {
+    $keys = array::keys($m);
+    return array::contains($keys, "create_table") || array::contains($keys, "add_column") || array::contains($keys, "add_index");
+}
+
+// One column's type SQL for a driver. pk carries its own PK + auto-increment.
+function migrate__sqltype($driver, $type, $size) {
+    if ($type == "pk") {
+        if ($driver == "mysql") { return "BIGINT AUTO_INCREMENT PRIMARY KEY"; }
+        if ($driver == "postgres") { return "BIGSERIAL PRIMARY KEY"; }
+        return "INTEGER PRIMARY KEY AUTOINCREMENT";
+    }
+    if ($type == "string") {
+        $n = 255;
+        if ($size > 0) { $n = $size; }
+        return "VARCHAR(" . $n . ")";
+    }
+    if ($type == "text") { return "TEXT"; }
+    if ($type == "int") {
+        if ($driver == "mysql") { return "INT"; }
+        return "INTEGER";
+    }
+    if ($type == "bigint") {
+        if ($driver == "sqlite") { return "INTEGER"; }
+        return "BIGINT";
+    }
+    if ($type == "bool") {
+        if ($driver == "mysql") { return "TINYINT(1)"; }
+        if ($driver == "postgres") { return "BOOLEAN"; }
+        return "INTEGER";
+    }
+    if ($type == "datetime") {
+        if ($driver == "mysql") { return "DATETIME"; }
+        if ($driver == "postgres") { return "TIMESTAMP"; }
+        return "TEXT";
+    }
+    if ($type == "date") {
+        if ($driver == "sqlite") { return "TEXT"; }
+        return "DATE";
+    }
+    if ($type == "float") {
+        if ($driver == "mysql") { return "FLOAT"; }
+        return "REAL";
+    }
+    if ($type == "json") {
+        if ($driver == "mysql") { return "JSON"; }
+        if ($driver == "postgres") { return "JSONB"; }
+        return "TEXT";
+    }
+    // unknown → raw SQL type, pass through (escape hatch inside the type field)
+    return $type;
+}
+
+function migrate__quote_default($v) {
+    if (type::is_string($v)) { return "'" . $v . "'"; }
+    if (type::is_bool($v)) {
+        if ($v) { return "1"; }
+        return "0";
+    }
+    return "" . $v;
+}
+
+// Parse a compact column spec string into a [name, type, size, opts] coldef, so a
+// table reads top-to-bottom like a struct without positional noise:
+//   "email" => "string(255) unique"  ==  ["email", "string", 255, ["unique"=>true]]
+// Grammar: "<type>[(<size>)] [modifier ...]"
+//   type      : pk string int bigint text datetime date bool float json — or a raw SQL
+//               type as an escape hatch (e.g. "decimal(10,2)"), passed through verbatim.
+//   modifiers : unique · null · default=<val>.
+// FAIL-LOUD: an unknown modifier (e.g. a typo "uniqe") THROWS — never silently ignored
+// (a silently-dropped flag is exactly the class this project refuses). A type typo isn't
+// in the known set, so it passes through as raw SQL and the database rejects it loudly.
+function migrate__parse_spec($name, $spec) {
+    $parts = string::split(string::trim($spec), " ");
+    $head = $parts[0];
+    $type = $head;
+    $size = 0;
+    $paren = string::index_of($head, "(");
+    if ($paren >= 0) {
+        $before = string::substr($head, 0, $paren);
+        // Only "string" takes a bare (size); anything else with parens (decimal(10,2))
+        // is a raw SQL type and is left verbatim.
+        if ($before == "string") {
+            $type = "string";
+            $close = string::index_of($head, ")");
+            $size = int(string::substr($head, $paren + 1, $close - $paren - 1));
+        }
+    }
+    $opts = [];
+    $i = 1;
+    while ($i < count($parts)) {
+        $mod = string::trim($parts[$i]);
+        if (string::len($mod) > 0) {
+            $ok = false;
+            if ($mod == "unique") { $opts["unique"] = true; $ok = true; }
+            if ($mod == "null") { $opts["null"] = true; $ok = true; }
+            if (string::starts_with($mod, "default=")) { $opts["default"] = string::substr($mod, 8); $ok = true; }
+            if (!$ok) {
+                throw "migrate: unknown column modifier '" . $mod . "' in \"" . $name . " => " . $spec . "\" (allowed: unique, null, default=...; for an index use a separate add_index)";
+            }
+        }
+        $i = $i + 1;
+    }
+    return [$name, $type, $size, $opts];
+}
+
+// Full DDL for one column: "name TYPE [NOT NULL] [DEFAULT x] [UNIQUE]".
+function migrate__col_ddl($driver, $col) {
+    $name = $col[0];
+    $type = $col[1];
+    $size = 0;
+    $opts = [];
+    if (count($col) >= 3) {
+        if (type::is_int($col[2])) {
+            $size = $col[2];
+        } else {
+            $opts = $col[2];
+        }
+    }
+    if (count($col) >= 4) {
+        $opts = $col[3];
+    }
+    $ddl = $name . " " . migrate__sqltype($driver, $type, $size);
+    if ($type != "pk") {
+        // Varsayilan NOT NULL (katı-default ilkesi: cookie/DB-TLS gibi — gevseklik ACIKCA
+        // istenir). Nullable kolon icin ["null"=>true] yaz. Cogu kolon NOT NULL oldugundan
+        // bu ortak durumu sadelestirir (her satira ["null"=>false] yazmaya gerek kalmaz).
+        if (migrate__opt($opts, "null", false) == false) {
+            $ddl = $ddl . " NOT NULL";
+        }
+        if (array::contains(array::keys($opts), "default")) {
+            $ddl = $ddl . " DEFAULT " . migrate__quote_default($opts["default"]);
+        }
+        if (migrate__opt($opts, "unique", false) == true) {
+            $ddl = $ddl . " UNIQUE";
+        }
+    }
+    return $ddl;
+}
+
+function migrate__index_name($m) {
+    return "idx_" . $m["add_index"] . "_" . string::join($m["columns"], "_");
+}
+
+// The forward (up) DDL for a schema migration.
+function migrate__gen_up($driver, $m) {
+    $keys = array::keys($m);
+    if (array::contains($keys, "create_table")) {
+        $cols = [];
+        // Two column forms, both supported: the compact "name" => "type:size mods"
+        // assoc (reads like a struct), or the explicit [name, type, size, opts] array.
+        foreach ($m["columns"] as $k => $v) {
+            $col = $v;
+            if (type::is_string($v)) {
+                $col = migrate__parse_spec("" . $k, $v);
+            }
+            push($cols, migrate__col_ddl($driver, $col));
+        }
+        return "CREATE TABLE " . $m["create_table"] . " (" . string::join($cols, ", ") . ")";
+    }
+    if (array::contains($keys, "add_column")) {
+        return "ALTER TABLE " . $m["add_column"] . " ADD COLUMN " . migrate__col_ddl($driver, $m["column"]);
+    }
+    if (array::contains($keys, "add_index")) {
+        $unique = "";
+        if (migrate__opt($m, "unique", false) == true) {
+            $unique = "UNIQUE ";
+        }
+        return "CREATE " . $unique . "INDEX " . migrate__index_name($m) . " ON " . $m["add_index"] . " (" . string::join($m["columns"], ", ") . ")";
+    }
+    return "";
+}
+
+// The auto-generated rollback (down) DDL for a schema migration.
+function migrate__gen_down($driver, $m) {
+    $keys = array::keys($m);
+    if (array::contains($keys, "create_table")) {
+        return "DROP TABLE " . $m["create_table"];
+    }
+    if (array::contains($keys, "add_column")) {
+        return "ALTER TABLE " . $m["add_column"] . " DROP COLUMN " . $m["column"][0];
+    }
+    if (array::contains($keys, "add_index")) {
+        if ($driver == "mysql") {
+            return "DROP INDEX " . migrate__index_name($m) . " ON " . $m["add_index"];
+        }
+        return "DROP INDEX " . migrate__index_name($m);
+    }
+    return "";
+}
+
+// Public: the up DDL a schema migration would run on $driver — for inspection/testing
+// without a database. Raw migrations return their "up" unchanged.
+function migrate_ddl($driver, $m) {
+    if (migrate__is_schema($m)) {
+        return migrate__gen_up($driver, $m);
+    }
+    return $m["up"];
+}
+
+function migrate_applied($conn) {
+    migrate__ensure($conn);
+    $rows = db::query($conn, "SELECT id FROM _look_migrations ORDER BY id", []);
+    $out = [];
+    foreach ($rows as $r) {
+        push($out, $r["id"]);
+    }
+    return $out;
+}
+
+function migrate_run($conn, $migrations) {
+    migrate__ensure($conn);
+    $applied = [];
+    $driver = "";
+    foreach ($migrations as $m) {
+        $id = $m["id"];
+        if (migrate__is_applied($conn, $id)) {
+            continue;
+        }
+        // Schema migration → generate DDL for the live driver; raw → use "up" as-is.
+        $up = "";
+        if (migrate__is_schema($m)) {
+            if ($driver == "") {
+                $driver = db::driver($conn);
+            }
+            $up = migrate__gen_up($driver, $m);
+        } else {
+            $up = $m["up"];
+        }
+        // No explicit transaction: DDL auto-commits on MySQL regardless (so a wrapper is
+        // false assurance), and wrapping interfered on PostgreSQL. Keep one logical change
+        // per migration and application stays predictable — the statement runs, then the
+        // tracking row records it.
+        try {
+            migrate__exec_all($conn, $up);
+            db::exec($conn, "INSERT INTO _look_migrations (id, applied_at) VALUES (?, ?)", [$id, date::now()]);
+        } catch ($e) {
+            throw "migrate: '" . $id . "' failed: " . error::message($e);
+        }
+        push($applied, $id);
+    }
+    return $applied;
+}
+
+function migrate_status($conn, $migrations) {
+    migrate__ensure($conn);
+    $out = [];
+    foreach ($migrations as $m) {
+        push($out, ["id" => $m["id"], "applied" => migrate__is_applied($conn, $m["id"])]);
+    }
+    return $out;
+}
+
+// Undo the most recently applied migration: run its "down" body (if any) and drop
+// its tracking row, in one transaction. Returns the rolled-back id, or "" if there
+// was nothing applied. A migration with no "down" is simply un-tracked.
+function migrate_rollback($conn, $migrations) {
+    migrate__ensure($conn);
+    $applied = migrate_applied($conn);
+    if (count($applied) == 0) {
+        return "";
+    }
+    $last = $applied[count($applied) - 1];
+    // Resolve the down body. Precedence: an explicit "down" always wins. Otherwise a
+    // schema migration auto-generates its down (DROP TABLE / DROP COLUMN / DROP INDEX).
+    // A raw migration with no "down" at all is a mistake — throw rather than silently
+    // un-track (use "down" => "" to mark it intentionally irreversible).
+    $found = false;
+    $has_down = false;
+    $is_schema = false;
+    $down = "";
+    $target = [];
+    foreach ($migrations as $m) {
+        if ($m["id"] == $last) {
+            $found = true;
+            $target = $m;
+            if (array::contains(array::keys($m), "down")) {
+                $has_down = true;
+                $down = $m["down"];
+            }
+            $is_schema = migrate__is_schema($m);
+        }
+    }
+    if ($found && !$has_down) {
+        if ($is_schema) {
+            $down = migrate__gen_down(db::driver($conn), $target);
+        } else {
+            throw "migrate: cannot roll back '" . $last . "': no down defined (use \"down\" => \"\" if it is intentionally irreversible)";
+        }
+    }
+    try {
+        migrate__exec_all($conn, $down);
+        db::exec($conn, "DELETE FROM _look_migrations WHERE id=?", [$last]);
+    } catch ($e) {
+        throw "migrate: rollback '" . $last . "' failed: " . error::message($e);
+    }
+    return $last;
+}
+
+// A sortable, collision-free migration id: "<YYYYMMDD_HHMMSS>_<name>". Timestamp-based
+// (like Rails/Laravel) because LOOK can't list a directory — no counter to derive, and
+// two developers scaffolding at once never clash on the same "0004".
+function migrate__timestamp() {
+    $now = date::now();                                  // "2026-06-09 14:32:00"
+    $d = string::replace(string::substr($now, 0, 10), "-", "");
+    $t = string::replace(string::substr($now, 11, 8), ":", "");
+    return $d . "_" . $t;
+}
+
+// Scaffold a migration: `lk migrate.lk make <name>`. Creates the migrate/ file pair and
+// prints the ready-to-paste entry. Two protections: the name is validated (no traversal),
+// and existing files are never overwritten (that would be data loss).
+function migrate__make($name) {
+    if (!string::regex_match($name, "^[a-z0-9_]+$")) {
+        throw "migrate: invalid name '" . $name . "' — use lowercase letters, digits and underscore only";
+    }
+    $id = migrate__timestamp() . "_" . $name;
+    $up = "migrate/" . $id . ".sql";
+    $down = "migrate/" . $id . ".down.sql";
+    if (file::exists($up)) {
+        throw "migrate: '" . $up . "' already exists — refusing to overwrite";
+    }
+    file::put($up, "-- " . $id . " (up)\n-- Raw SQL for a data migration; or leave empty and use the create_table entry below.\n");
+    file::put($down, "-- " . $id . " (down)\n");
+    print("created " . $up);
+    print("created " . $down);
+    print("");
+    print("Add ONE of these to your migrate.lk migrations list:");
+    print("");
+    print("  # portable schema (recommended):");
+    print("  [\"id\" => \"" . $id . "\", \"create_table\" => \"" . $name . "\", \"columns\" => [");
+    print("      \"id\"         => \"pk\",");
+    print("      \"created_at\" => \"datetime\"");
+    print("  ]],");
+    print("");
+    print("  # raw SQL (write it in " . $up . "):");
+    print("  [\"id\" => \"" . $id . "\", \"up\" => file::read(\"" . $up . "\"), \"down\" => file::read(\"" . $down . "\")],");
+}
+
+// Terminal entry point: dispatch on the first CLI argument (up|down|status,
+// default up) and print a human-readable result. A one-line .lk runner becomes a
+// real command:  lk migrate.lk up | lk migrate.lk down | lk migrate.lk status
+// (requires a LOOK with args(); on older builds pass the command via the MIGRATE_CMD
+// env var as a fallback.)
+function migrate_cli($conn, $migrations) {
+    // args() is the real path (lk migrate.lk up). On a LOOK without args() it throws;
+    // we catch that and fall back to the MIGRATE_CMD env var, so this one runner works
+    // on both new and old runtimes.
+    $a = [];
+    try {
+        $a = args();
+    } catch ($e) {
+        $a = [];
+    }
+    $cmd = "up";
+    if (count($a) > 0) {
+        $cmd = $a[0];
+    } else {
+        $cmd = env("MIGRATE_CMD", "up");
+    }
+    if ($cmd == "make") {
+        $name = "";
+        if (count($a) >= 2) {
+            $name = $a[1];
+        }
+        if (string::len($name) == 0) {
+            print("usage: lk migrate.lk make <name>   e.g. lk migrate.lk make user");
+            return;
+        }
+        migrate__make($name);
+        return;
+    }
+    if ($cmd == "status") {
+        print("Migration status:");
+        foreach (migrate_status($conn, $migrations) as $s) {
+            $mark = "pending";
+            if ($s["applied"]) {
+                $mark = "applied";
+            }
+            print("  [" . $mark . "] " . $s["id"]);
+        }
+        return;
+    }
+    if ($cmd == "down" || $cmd == "rollback") {
+        $id = migrate_rollback($conn, $migrations);
+        if (string::len($id) == 0) {
+            print("Nothing to roll back.");
+        } else {
+            print("Rolled back: " . $id);
+        }
+        return;
+    }
+    // Only an explicit "up" (or the no-argument default) applies migrations. An
+    // UNKNOWN command must NEVER fall through to up — "up" changes the schema, so a
+    // typo like `lk migrate.lk statuss` would silently migrate. Fail loud instead.
+    if ($cmd != "up") {
+        print("migrate: unknown command '" . $cmd . "'");
+        print("usage: lk migrate.lk [make <name> | up | down | status]");
+        exit(1);
+    }
+    $done = migrate_run($conn, $migrations);
+    if (count($done) == 0) {
+        print("Already up to date.");
+    } else {
+        print("Applied " . count($done) . " migration(s):");
+        foreach ($done as $id) {
+            print("  + " . $id);
+        }
+    }
+}
