@@ -258,13 +258,20 @@ function render_published($type, $slug) {
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
 }
-// Built-in type URL patterns, registered directly. NOTE: dynamic per-type routing
-// (a foreach over content_types registering each url_pattern) is BLOCKED by a real
-// web-runtime bug, isolated here: in lk-fcgi, a closure that captures an assoc-indexed
-// loop value (`$t = $pt["slug"]; use($t)`) receives it ARRAY-WRAPPED (`["product"]`
-// not `"product"`) at request time — so the type lookup fails. Direct routes with
-// literal args are unaffected. See FRICTION_phase1.md #3 (core candidate). The
-// "/{slug}" page catch-all MUST be registered LAST.
+// DYNAMIC per-type routing: one route per type's url_pattern, straight from
+// content_types — a NEW type auto-routes with no code change. Uses AUTO-capture (no
+// use()) on purpose: a VM bug wraps a `use()`-captured loop-local in a single-element
+// array at request time (see FRICTION_phase1.md #3, core candidate); auto-capture is
+// clean. Sorted by url_pattern length DESC so the bare "/{slug}" catch-all is LAST.
+// Built-in type URL patterns, registered directly. Two isolated findings block
+// DB-driven dynamic registration here (see FRICTION_phase1.md #3):
+//   (a) db::query at the setup/route-collection pass returns 0 rows (the DB is not
+//       queryable during route registration) — so routes can't be read from
+//       content_types at startup; a config-driven source (a types.json read at setup)
+//       or a request-time dispatcher is the design answer.
+//   (b) a VM bug array-wraps a use()-captured loop-local — auto-capture avoids it.
+// So built-in patterns are registered directly; dynamic per-type routing = a design
+// step (config-driven), not just a code tweak. "/{slug}" page catch-all is LAST.
 route("GET", "/products/{slug}", function() { return render_published("product", request::param("slug")); });
 route("GET", "/blog/{slug}",     function() { return render_published("post",    request::param("slug")); });
 route("GET", "/{slug}",          function() { return render_published("page",    request::param("slug")); });
