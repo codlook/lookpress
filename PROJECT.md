@@ -70,6 +70,12 @@ for a platform too — no work is lost):
   the build). **Read-surface invariant:** every public read surface (static build, search,
   `/api/{type}`, feeds) reads `published_rev` only; drafts are reachable only through admin-session
   surfaces (`/admin`, `/preview`).
+  **Output-path collision aborts the build (loudly).** Because `UNIQUE(lang,type,slug)` lets two
+  types share a slug, uniqueness of the *rendered URL* is now a **build-time** property — the types'
+  `url_pattern`s must not collide. If two content items would render to the same output path, the
+  build **aborts and names both slugs**, never silently letting the last writer win. (Design-first
+  sibling of the golden gate: a correctness claim carries its enforcement point — here, the point is
+  the build step, and the moment `UNIQUE(lang,type,slug)` moved URL-uniqueness out of the DB.)
 
 **④–⑦ are what make it a platform** (new, first-class — not deferred):
 
