@@ -1,4 +1,4 @@
-# LOOK CMS — Design (Platform)
+# LookPress — Design (Platform)
 
 Status: **draft for approval (platform revision).** This supersedes the publishing-engine draft.
 No code beyond the shared foundation (Phases 1–2) until this is approved.
@@ -182,3 +182,33 @@ WYSIWYG beyond the Markdown-backed editor.
    the deploy docs must say so — without this line, the first Dockerized commerce user meets a lock.
 3. Admin scope: confirm **"good-enough + API-first,"** not WP-admin parity, as the ⑦ ceiling.
 4. Is the **commerce test** (Phase 6) accepted as the platform's definition of done?
+
+## Deferred to extensions or later phases (the "az yapı" filter)
+
+The core stays small. These are **not** in the v1 core — each is an extension, or a later phase
+gated by a real named need (not "WordPress has it"):
+
+```
+Extensions   : AI · analytics · image processing (resize needs an external lib — an optional
+               dependency, never core) · OAuth / passkeys · commerce · newsletter / CRM / membership
+Deferred     : GraphQL (REST + JSON is enough; a query-language layer is abstraction bloat) ·
+               a block/Gutenberg editor (Markdown-first; blocks are an extension) · a workflow /
+               automation engine · realtime (WebSocket/SSE) · multisite / multi-tenant ·
+               a command palette (Ctrl+K) · advanced field types (location/video/formula/repeater) ·
+               cluster scale-out (the stateless *principle* is kept; the scale-out is aspiration)
+No ORM       : query + repository + migration, with native SQL when needed ("convenience, not a prison")
+```
+
+## Honest labels (this project's discipline, applied to the vision)
+
+```
+"plugin sandbox" / capability enforcement  → research-grade. v1 = declared + audited capabilities
+   (manifest visible, calls logged — already ahead of WordPress, which has no manifest). Hard
+   enforcement ("an extension cannot exceed its manifest, runtime-guaranteed") is a TARGET, claimed
+   only after adversarial escape testing. Third-party extension trust = WordPress-like until then.
+"themes cannot run code"  → earned by a trivial file-type gate (a theme package containing a .lk file
+   is rejected at install), not by capability enforcement.
+performance claims  → every module is measured in µs / allocations; a published number is a measured
+   number. "Fast by architecture" is written only next to a benchmark.
+dependencies  → "minimal external runtime dependencies," never "zero dependency."
+```

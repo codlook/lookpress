@@ -1,4 +1,5 @@
-# LOOK CMS
+# LookPress
+n**A Look-native web application & content platform.** Small core, static-first, API-first; measured, not promised.
 
 A **static-first, version-controlled** **site platform** built on
 [LOOK](https://github.com/codlook/look).
