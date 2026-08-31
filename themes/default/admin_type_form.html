@@ -1,0 +1,12 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>{$heading}</h2>
+{#each $errors as $e}<p class="error">{$e}</p>{/each}
+<form method="post" action="{$action}">
+<label>Slug <input name="slug" value="{$slug}" required></label>
+{!$fields_html}
+<label>Status <select name="status"><option value="draft">draft</option><option value="published">published</option></select></label>
+<button type="submit">Save</button>
+<a class="muted" href="/admin/type/{$type.slug}" style="margin-left:12px">Cancel</a>
+</form>
+{/block}

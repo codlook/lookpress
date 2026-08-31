@@ -1,0 +1,15 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>{$type.label} <a class="btn" href="/admin/type/{$type.slug}/new">+ New</a> <a class="btn" href="/admin">Types</a></h2>
+<table>
+<tr><th>Title</th><th>Slug</th><th>Status</th><th></th></tr>
+{#each $items as $it}
+<tr>
+<td><a href="/admin/type/{$type.slug}/edit/{$it.id}">{$it.title}</a></td>
+<td class="muted">{$it.slug}</td>
+<td>{$it.status}</td>
+<td><a href="/preview/{$it.id}">preview</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Delete?')"><button class="del" type="submit">Delete</button></form></td>
+</tr>
+{/each}
+</table>
+{/block}

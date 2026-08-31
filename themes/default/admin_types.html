@@ -1,0 +1,8 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Content types</h2>
+<p class="muted"><a href="/admin/logout">Log out</a></p>
+<ul class="pages">
+{#each $types as $t}<li><a href="/admin/type/{$t.slug}">{$t.label}</a> <span class="muted">({$t.slug})</span></li>{/each}
+</ul>
+{/block}

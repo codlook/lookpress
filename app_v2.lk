@@ -1,0 +1,268 @@
+// app_v2.lk — the type engine. One set of generic admin routes serves EVERY content
+// type; define a type in content_types and the system generates its form, validation,
+// admin CRUD, and JSON API — no type-specific code. Reads the versioned core:
+// public surfaces read published_rev only; admin reads current_rev; preview is admin-gated.
+use db;
+use template;
+use session;
+use string;
+use type;
+use array;
+use crypto;
+use date;
+use json;
+use html;
+use "lib/markdown.lk";
+
+function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
+function view($tpl, $data) { return template::render("themes/default/" . $tpl, $data); }
+function is_admin() { session::start(); return session::get("admin") == "1"; }
+
+// ── type engine: load a type + its field defs ───────────────────────────────
+function load_type($c, $slug) {
+    $rows = db::query($c, "SELECT slug, label, url_pattern, fields_json FROM content_types WHERE slug = ?", [$slug]);
+    if (count($rows) == 0) { return null; }
+    $t = $rows[0];
+    $t["fields"] = json::decode($t["fields_json"]);
+    return $t;
+}
+
+// Render one field's input HTML from its definition (+ current value).
+function field_input($c, $f, $value) {
+    $name = $f["name"];
+    $t = $f["type"];
+    $v = html::escape($value);
+    if ($t == "markdown" || $t == "textarea") {
+        return "<label>" . $name . "<textarea name=\"" . $name . "\" rows=\"10\">" . $v . "</textarea></label>";
+    }
+    if ($t == "bool") {
+        $chk = ""; if ($value == "1" || $value == "true") { $chk = " checked"; }
+        return "<label class=\"cb\"><input type=\"checkbox\" name=\"" . $name . "\" value=\"1\"" . $chk . "> " . $name . "</label>";
+    }
+    if ($t == "int" || $t == "decimal") {
+        return "<label>" . $name . "<input type=\"number\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "date") {
+        return "<label>" . $name . "<input type=\"date\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "select") {
+        $opts = "";
+        foreach ($f["choices"] as $ch) {
+            $sel = ""; if ($ch == $value) { $sel = " selected"; }
+            $opts = $opts . "<option value=\"" . html::escape($ch) . "\"" . $sel . ">" . html::escape($ch) . "</option>";
+        }
+        return "<label>" . $name . "<select name=\"" . $name . "\">" . $opts . "</select></label>";
+    }
+    if ($t == "relation") {
+        // single-select of existing content of the target type (multi-select + picker → Faz 6)
+        $target = $f["to"];
+        $rows = db::query($c, "SELECT c.id, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY r.title", [$target]);
+        $opts = "<option value=\"\">—</option>";
+        foreach ($rows as $row) {
+            $sel = ""; if (type::to_int($value) == type::to_int($row["id"])) { $sel = " selected"; }
+            $opts = $opts . "<option value=\"" . $row["id"] . "\"" . $sel . ">" . html::escape($row["title"]) . "</option>";
+        }
+        return "<label>" . $name . " (" . $target . ")<select name=\"" . $name . "\">" . $opts . "</select></label>";
+    }
+    // default: text
+    return "<label>" . $name . "<input name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+}
+
+function fields_form_html($c, $fields, $values) {
+    $h = "";
+    foreach ($fields as $f) {
+        $val = "";
+        if ($values != null) { $val = $values[$f["name"]]; }
+        $h = $h . field_input($c, $f, $val);
+    }
+    return $h;
+}
+
+// Server-side validation — form HTML is NOT security. Returns [errors[], values{}].
+function validate_post($c, $fields) {
+    $errors = [];
+    $values = [];
+    foreach ($fields as $f) {
+        $name = $f["name"];
+        $t = $f["type"];
+        $raw = request::post($name);
+        if ($t == "bool") {
+            $bv = "0"; if ($raw == "1") { $bv = "1"; }
+            $values = array::set($values, $name, $bv);
+        } else {
+            if ($raw == null) { $raw = ""; }
+            $raw = string::trim($raw);
+            $req = $f["required"];
+            if ($req && $raw == "") { $errors = array::push($errors, $name . " is required"); }
+            if ($t == "int" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+$")) { $errors = array::push($errors, $name . " must be an integer"); }
+            if ($t == "decimal" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+(\\.[0-9]+)?$")) { $errors = array::push($errors, $name . " must be a number"); }
+            if ($t == "select" && $raw != "") {
+                $ok = false; foreach ($f["choices"] as $ch) { if ($ch == $raw) { $ok = true; } }
+                if (!$ok) { $errors = array::push($errors, $name . " is not an allowed choice"); }
+            }
+            if ($t == "relation" && $raw != "") {
+                $ex = db::query($c, "SELECT id FROM content WHERE id = ? AND type = ?", [type::to_int($raw), $f["to"]]);
+                if (count($ex) == 0) { $errors = array::push($errors, $name . ": invalid relation target " . $raw); }
+            }
+            $values = array::set($values, $name, $raw);
+        }
+    }
+    return ["errors" => $errors, "values" => $values];
+}
+
+// ── versioned-core write: create/update content as a new revision ────────────
+function save_content($c, $type, $id, $slug, $values, $status) {
+    $title = $values["title"];
+    $body_md = $values["body"];
+    $body_html = markdown_to_html($body_md);
+    $fields_json = json::encode($values);
+    $ts = date::timestamp();
+    if ($id == 0) {
+        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, 'tr', ?, ?, ?)", [$type, $slug, $status, $ts, $ts]);
+        $id = db::last_id($c);
+    } else {
+        db::exec($c, "UPDATE content SET slug = ?, status = ?, updated_at = ? WHERE id = ?", [$slug, $status, $ts, $id]);
+    }
+    // rev_no = max+1
+    $mx = db::query($c, "SELECT COALESCE(MAX(rev_no),0) AS m FROM revisions WHERE content_id = ?", [$id]);
+    $rev_no = type::to_int($mx[0]["m"]) + 1;
+    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'admin edit')", [$id, $rev_no, $title, $body_md, $body_html, $fields_json, $ts]);
+    $rid = db::last_id($c);
+    $prev = 0;
+    if ($status == "published") { $prev = $rid; }
+    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $id]);
+    return $id;
+}
+
+// ── admin auth ───────────────────────────────────────────────────────────────
+route("GET", "/admin/login", function() { return response::html(view("login.html", ["error" => ""])); });
+route("POST", "/admin/login", function() {
+    if (crypto::constant_compare(request::post("password"), env("ADMIN_PASSWORD", "changeme"))) {
+        session::start(); session::regenerate(); session::set("admin", "1");
+        return response::redirect("/admin");
+    }
+    return response::html(view("login.html", ["error" => "Wrong password."]));
+});
+route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
+
+// Admin dashboard: list the types (the engine's entry point).
+route("GET", "/admin", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
+    return response::html(view("admin_types.html", ["types" => $types]));
+});
+
+// ── GENERIC admin CRUD — ONE handler set for EVERY type (the type engine) ────
+route("GET", "/admin/type/{type}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    // admin reads current_rev (draft-aware)
+    $items = db::query($c, "SELECT c.id, c.slug, c.status, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY c.updated_at DESC", [$t["slug"]]);
+    return response::html(view("admin_type_list.html", ["type" => $t, "items" => $items]));
+});
+
+route("GET", "/admin/type/{type}/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $form = fields_form_html($c, $t["fields"], null);
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "errors" => []]));
+});
+
+route("POST", "/admin/type/{type}/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $v = validate_post($c, $t["fields"]);
+    $slug = string::trim(request::post("slug"));
+    $errs = $v["errors"];
+    if ($slug == "") { $errs = array::push($errs, "slug is required"); }
+    if (count($errs) > 0) {
+        $form = fields_form_html($c, $t["fields"], $v["values"]);
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
+    }
+    save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"));
+    return response::redirect("/admin/type/" . $t["slug"]);
+});
+
+route("GET", "/admin/type/{type}/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $rows = db::query($c, "SELECT c.slug, c.status, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, "No such item"); }
+    $vals = json::decode($rows[0]["fields_json"]);
+    $form = fields_form_html($c, $t["fields"], $vals);
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "errors" => []]));
+});
+
+route("POST", "/admin/type/{type}/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $v = validate_post($c, $t["fields"]);
+    $slug = string::trim(request::post("slug"));
+    if (count($v["errors"]) > 0) {
+        $form = fields_form_html($c, $t["fields"], $v["values"]);
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $v["errors"]]));
+    }
+    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"));
+    return response::redirect("/admin/type/" . $t["slug"]);
+});
+
+route("POST", "/admin/type/{type}/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    db::exec($c, "DELETE FROM revisions WHERE content_id = ?", [request::param("id")]);
+    db::exec($c, "DELETE FROM content WHERE id = ?", [request::param("id")]);
+    return response::redirect("/admin/type/" . request::param("type"));
+});
+
+// ── JSON API — published_rev ONLY (read-surface invariant) ────────────────────
+route("GET", "/api/{type}", function() {
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC", [$t["slug"]]);
+    $out = [];
+    foreach ($rows as $row) {
+        $item = json::decode($row["fields_json"]);
+        $item = array::set($item, "slug", $row["slug"]);
+        $out = array::push($out, $item);
+    }
+    response::text(json::encode($out));
+    response::header("Content-Type", "application/json");
+    return;
+});
+
+// ── preview — admin-session gated (draft reachable ONLY here) ─────────────────
+route("GET", "/preview/{id}", function() {
+    if (!is_admin()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
+});
+
+// ── public: published_rev ONLY. Serve content of a type by slug. ─────────────
+function render_published($type, $slug) {
+    $c = conn();
+    $rows = db::query($c, "SELECT r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0", [$type, $slug]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
+}
+// NOTE: route() must be a direct top-level statement — a route() inside a loop is
+// not collected by the setup pass (a real finding; see FRICTION). So built-in type
+// URL patterns are registered directly; a per-type dynamic registration mechanism
+// (so a NEW type's url_pattern auto-routes) is the next refinement.
+// The /{slug} page catch-all MUST be registered LAST.
+route("GET", "/products/{slug}", function() { return render_published("product", request::param("slug")); });
+route("GET", "/blog/{slug}",     function() { return render_published("post",    request::param("slug")); });
+route("GET", "/{slug}",          function() { return render_published("page",    request::param("slug")); });
