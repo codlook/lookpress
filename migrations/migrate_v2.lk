@@ -50,6 +50,12 @@ migrate_run($c, $migrations);
 // create it directly.
 db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_lang_type_slug ON content(lang, type, slug)", []);
 
+// Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
+// this table, so the live DB already has it; but a FRESH v2-only clone would not, and
+// /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently
+// so a clean clone works out of the box; on the live DB this is a no-op.
+db::exec($c, "CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY AUTOINCREMENT, sha_name VARCHAR(80) UNIQUE, original VARCHAR(255), mime VARCHAR(80), size INTEGER DEFAULT 0, created_at INTEGER DEFAULT 0)", []);
+
 // ── seed built-in types ─────────────────────────────────────────────────────
 function seed_type($c, $slug, $label, $url, $fields) {
     $ex = db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug]);
