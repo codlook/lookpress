@@ -3,6 +3,7 @@
 // admin CRUD, and JSON API — no type-specific code. Reads the versioned core:
 // public surfaces read published_rev only; admin reads current_rev; preview is admin-gated.
 use db;
+use cache;
 use template;
 use session;
 use string;
@@ -17,6 +18,29 @@ use "lib/markdown.lk";
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
 function view($tpl, $data) { return template::render("themes/default/" . $tpl, $data); }
 function is_admin() { session::start(); return session::get("admin") == "1"; }
+
+// ── dispatcher type-pattern cache ────────────────────────────────────────────
+// The request-time dispatcher resolves url_pattern -> type slug on EVERY public hit.
+// content_types changes rarely, so cache the whole (small) pattern->slug map for 60s
+// under ONE key (not per-URL — a per-URL miss cache would let random paths fill it).
+// BUSTED on any content_types write (types_cache_bust) so a NEW type's URL is live
+// immediately — without the bust the new URL would lag up to the 60s TTL, breaking the
+// "restart-less URL" guarantee. Correctness first; the cache is the free win on top.
+function type_patterns($c) {
+    $m = cache::get("cms:type_patterns");
+    if ($m != null) { return $m; }
+    $m = array::new_assoc();
+    $rows = db::query($c, "SELECT slug, url_pattern FROM content_types", []);
+    foreach ($rows as $r) { $m = array::set($m, $r["url_pattern"], $r["slug"]); }
+    cache::set("cms:type_patterns", $m, 60);
+    return $m;
+}
+function type_for_pattern($c, $pattern) {
+    $m = type_patterns($c);
+    if (array::contains(array::keys($m), $pattern)) { return $m[$pattern]; }
+    return "";
+}
+function types_cache_bust() { cache::delete("cms:type_patterns"); }
 
 // ── type engine: load a type + its field defs ───────────────────────────────
 function load_type($c, $slug) {
@@ -188,6 +212,7 @@ route("POST", "/admin/types/new", function() {
         return response::html(view("admin_type_def.html", ["slug" => $slug, "label" => $label, "url_pattern" => $url, "fields" => $fields_raw, "errors" => $errs]));
     }
     db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES (?, ?, ?, ?)", [$slug, $label, $url, json::encode($fields)]);
+    types_cache_bust();   // new type's URL live immediately (no 60s TTL lag)
     return response::redirect("/admin/type/" . $slug);
 });
 
@@ -314,13 +339,13 @@ function render_published($type, $slug) {
 //                          product: /blog/{slug}, /products/{slug}), slug=b
 route("GET", "/{a}", function() {
     $c = conn();
-    $t = db::query($c, "SELECT slug FROM content_types WHERE url_pattern = '/{slug}'", []);
-    if (count($t) == 0) { return response::status(404, view("notfound.html", [])); }
-    return render_published($t[0]["slug"], request::param("a"));
+    $slug = type_for_pattern($c, "/{slug}");           // cached (60s, busted on type write)
+    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
+    return render_published($slug, request::param("a"));
 });
 route("GET", "/{a}/{b}", function() {
     $c = conn();
-    $t = db::query($c, "SELECT slug FROM content_types WHERE url_pattern = ?", ["/" . request::param("a") . "/{slug}"]);
-    if (count($t) == 0) { return response::status(404, view("notfound.html", [])); }
-    return render_published($t[0]["slug"], request::param("b"));
+    $slug = type_for_pattern($c, "/" . request::param("a") . "/{slug}");
+    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
+    return render_published($slug, request::param("b"));
 });
