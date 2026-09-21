@@ -322,11 +322,19 @@ function render_published($type, $slug) {
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
 }
-// ── v1 parity: blog index (paginated) + media library ────────────────────────
+// ── v1 parity: home + blog index (paginated) + media library ─────────────────
 // Specific routes — MUST be registered BEFORE the generic dispatcher catch-alls below
 // (route-shadow: first-match wins). Blog posts are versioned content of type 'post';
 // the public listing reads published_rev ONLY (read-surface invariant). Post DETAIL is
 // served by the dispatcher (url_pattern '/blog/{slug}'), so only the index lives here.
+
+// Home — published pages, alphabetical (v1 "/" parity, on the versioned core).
+route("GET", "/", function() {
+    $c = conn();
+    $pages = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'page' AND c.published_rev > 0 ORDER BY r.title", []);
+    return response::html(view("home.html", ["pages" => $pages]));
+});
+
 route("GET", "/blog", function() {
     $c = conn();
     $per = 5;
