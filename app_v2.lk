@@ -11,6 +11,7 @@ use type;
 use array;
 use crypto;
 use date;
+use file;
 use json;
 use html;
 use "lib/markdown.lk";
@@ -321,6 +322,78 @@ function render_published($type, $slug) {
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"]]));
 }
+// ── v1 parity: blog index (paginated) + media library ────────────────────────
+// Specific routes — MUST be registered BEFORE the generic dispatcher catch-alls below
+// (route-shadow: first-match wins). Blog posts are versioned content of type 'post';
+// the public listing reads published_rev ONLY (read-surface invariant). Post DETAIL is
+// served by the dispatcher (url_pattern '/blog/{slug}'), so only the index lives here.
+route("GET", "/blog", function() {
+    $c = conn();
+    $per = 5;
+    $page = type::to_int(request::get("page") ?? "1");
+    if ($page < 1) { $page = 1; }
+    $offset = ($page - 1) * $per;
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'post' AND published_rev > 0", [])[0]["n"]);
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", [$per, $offset]);
+    return response::html(view("blog.html", [
+        "posts" => $posts, "page" => $page, "prev" => $page - 1, "next" => $page + 1,
+        "has_prev" => $page > 1, "has_next" => ($offset + $per) < $total
+    ]));
+});
+
+// Media library — uploads are NOT versioned content; a separate media table names files
+// by sha256 (dedupe) and keeps them outside the web root. Admin list/upload/delete;
+// public serve by the sha-hex name (a strict hex/ext whitelist rejects traversal).
+function media_mimes() { return ["image/png", "image/jpeg", "image/gif", "image/webp"]; }
+route("GET", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+    return response::html(view("admin_media.html", ["items" => $items, "error" => ""]));
+});
+route("POST", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $f = null;
+    try { $f = request::file("file", ["max_size" => 5242880, "allow_mime" => media_mimes()]); } catch ($e) { $f = null; }
+    if ($f == null) {
+        $c = conn();
+        $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+        return response::html(view("admin_media.html", ["items" => $items, "error" => "No file, or type not allowed (png / jpeg / gif / webp, max 5 MB)."]));
+    }
+    $s = file::store($f, "media");
+    $c = conn();
+    $exists = db::query($c, "SELECT id FROM media WHERE sha_name = ?", [$s["name"]]);
+    if (count($exists) == 0) {
+        db::exec($c, "INSERT INTO media (sha_name, original, mime, size, created_at) VALUES (?, ?, ?, ?, ?)", [$s["name"], $f["filename"], $s["mime"], $f["size"], date::timestamp()]);
+    }
+    return response::redirect("/admin/media");
+});
+route("POST", "/admin/media/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT sha_name FROM media WHERE id = ?", [request::param("id")]);
+    if (count($rows) > 0) {
+        $path = file::upload_dir() . "/media/" . $rows[0]["sha_name"];
+        if (file::exists($path)) { file::remove($path); }
+        db::exec($c, "DELETE FROM media WHERE id = ?", [request::param("id")]);
+    }
+    return response::redirect("/admin/media");
+});
+route("GET", "/media/{name}", function() {
+    $name = request::param("name");
+    if (!string::regex_match($name, "^[0-9a-f]{32}\\.[a-z0-9]{2,5}$")) { return response::status(404, "Not found"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT mime FROM media WHERE sha_name = ?", [$name]);
+    if (count($rows) == 0) { return response::status(404, "Not found"); }
+    $path = file::upload_dir() . "/media/" . $name;
+    if (!file::exists($path)) { return response::status(404, "Not found"); }
+    $bytes = file::read($path);
+    response::text($bytes);
+    response::header("Content-Type", $rows[0]["mime"]);
+    response::header("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+});
+
 // DYNAMIC per-type routing: one route per type's url_pattern, straight from
 // content_types — a NEW type auto-routes with no code change. Uses AUTO-capture (no
 // use()) on purpose: a VM bug wraps a `use()`-captured loop-local in a single-element
@@ -330,9 +403,9 @@ function render_published($type, $slug) {
 // A new type auto-routes with NO restart: url_patterns are resolved from the DB at
 // REQUEST time (where db:: works — the setup pass does not, see FRICTION #3a), and
 // the closures take no use()-captured loop-local (avoiding the VM wrap, #3b).
-// These two generic patterns MUST be the LAST routes registered — every specific
-// route (/admin, /api, /media, /preview, ...) is registered above and wins by
-// first-match. (Route-shadow contract, from the reference app's Slice 1.)
+// These two generic patterns MUST be the LAST routes registered — every specific route
+// registered above wins by first-match: /admin/*, /api/{type}, /preview/{id}, /blog and
+// /media/* (the v1-parity block just above). (Route-shadow contract, reference app Slice 1.)
 //
 //   1-segment  /{a}      → the type whose url_pattern is "/{slug}" (e.g. page), slug=a
 //   2-segment  /{a}/{b}  → the type whose url_pattern is "/{a}/{slug}"  (e.g. post,
