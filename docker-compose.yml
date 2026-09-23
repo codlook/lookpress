@@ -1,0 +1,22 @@
+# LookPress dev environment — `docker compose up` brings up a working LookPress.
+# Pure LOOK: one app service on the LOOK runtime, SQLite by default (no DB server
+# needed for dev). Swap DB_DSN to mysql://… / postgres://… when you add a db service.
+services:
+  lookpress:
+    build: .
+    image: lookpress:dev
+    container_name: lookpress
+    ports:
+      - "8080:7400"          # http://localhost:8080
+    volumes:
+      - lp_data:/data        # SQLite db (persisted)
+      - lp_uploads:/app/uploads
+    environment:
+      - DB_DSN=sqlite:///data/cms.db
+      - LOOK_SESSION_SECURE=0 # plain-HTTP dev; set 1 (or use a TLS proxy) in prod
+      - LOOKPRESS_SEED=1       # seed demo content on first run
+    restart: unless-stopped
+
+volumes:
+  lp_data:
+  lp_uploads:
