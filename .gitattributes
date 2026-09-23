@@ -1,0 +1,5 @@
+# Shell scripts and the Dockerfile must stay LF — they run inside Linux
+# containers, and CRLF (from a Windows checkout) breaks /bin/sh and COPY.
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+docker/*      text eol=lf
