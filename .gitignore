@@ -5,3 +5,6 @@ logs/
 uploads/
 build/
 build-next/
+
+# local secrets
+.env

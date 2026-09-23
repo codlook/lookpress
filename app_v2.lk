@@ -14,7 +14,14 @@ use date;
 use file;
 use json;
 use html;
+use log;
 use "lib/markdown.lk";
+
+// Fail-loud on an unset admin password (philosophy: nothing hidden). Login is
+// disabled until ADMIN_PASSWORD is set — no silent "changeme" backdoor ships.
+if (env("ADMIN_PASSWORD", "") == "") {
+    log::warn("ADMIN_PASSWORD is not set — /admin login is DISABLED. Set ADMIN_PASSWORD to enable it.");
+}
 
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
 function view($tpl, $data) { return template::render("themes/default/" . $tpl, $data); }
@@ -162,7 +169,11 @@ function save_content($c, $type, $id, $slug, $values, $status) {
 // ── admin auth ───────────────────────────────────────────────────────────────
 route("GET", "/admin/login", function() { return response::html(view("login.html", ["error" => ""])); });
 route("POST", "/admin/login", function() {
-    if (crypto::constant_compare(request::post("password"), env("ADMIN_PASSWORD", "changeme"))) {
+    // No silent default: an unset ADMIN_PASSWORD DISABLES login (never matches),
+    // rather than shipping a known "changeme" backdoor. Empty post is also refused.
+    $pw = env("ADMIN_PASSWORD", "");
+    $given = request::post("password");
+    if ($pw != "" && $given != "" && crypto::constant_compare($given, $pw)) {
         session::start(); session::regenerate(); session::set("admin", "1");
         return response::redirect("/admin");
     }

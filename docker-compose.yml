@@ -15,6 +15,10 @@ services:
       - DB_DSN=sqlite:///data/cms.db
       - LOOK_SESSION_SECURE=0 # plain-HTTP dev; set 1 (or use a TLS proxy) in prod
       - LOOKPRESS_SEED=1       # seed demo content on first run
+      # Admin password. Explicit dev value here (NOT a hidden code default) —
+      # override it: copy .env.example to .env and set ADMIN_PASSWORD, or export it.
+      # Unset => /admin login is disabled (fail-loud), never a "changeme" backdoor.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-lookpress-dev}
     restart: unless-stopped
 
 volumes:
