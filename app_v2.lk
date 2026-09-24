@@ -349,7 +349,7 @@ function render_fields_html($c, $type, $fields_json) {
         if ($v == null) { $v = ""; }
         if ($v == "") { continue; }
         if ($name == "image") {
-            $out = $out . "<img class=\"cf-image\" src=\"" . html::escape($v) . "\" alt=\"\">";
+            $out = $out . "<img class=\"cf-image\" src=\"" . html::escape($v) . "\" alt=\"\" onerror=\"this.style.display='none'\">";
         } else {
             if ($name == "price") {
                 $out = $out . "<div class=\"cf-price\">" . html::escape($v) . " &#8378;</div>";
@@ -397,7 +397,7 @@ function cards_html($base, $rows) {
         if ($img == null) { $img = ""; }
         if ($price == null) { $price = ""; }
         $imgh = "";
-        if ($img != "") { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($img) . "\" alt=\"\"></span>"; }
+        if ($img != "") { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($img) . "\" alt=\"\" onerror=\"this.style.display='none'\"></span>"; }
         $priceh = "";
         if ($price != "") { $priceh = "<div class=\"card-price\">" . html::escape($price) . " &#8378;</div>"; }
         $url = $base . "/" . $it["slug"];
@@ -613,7 +613,25 @@ route("GET", "/admin/order/{id}", function() {
     }
     $mail = $o["email"];
     if ($mail == "") { $mail = "—"; }
-    return response::html(view("admin_order.html", ["id" => $o["id"], "email" => $mail, "total" => $o["total"], "status" => $o["status"], "items" => $items_html]));
+    $statuses = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    $sel = "";
+    foreach ($statuses as $st) {
+        $selattr = "";
+        if ($st == $o["status"]) { $selattr = " selected"; }
+        $sel = $sel . "<option value=\"" . $st . "\"" . $selattr . ">" . $st . "</option>";
+    }
+    return response::html(view("admin_order.html", ["id" => $o["id"], "email" => $mail, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
+});
+route("POST", "/admin/order/{id}/status", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $status = request::post("status");
+    $allowed = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    if (array::contains($allowed, $status)) {
+        db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
+    }
+    return response::redirect("/admin/order/" . $id);
 });
 
 // ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────

@@ -1,7 +1,13 @@
 {#extends "themes/default/layout"}
 {#block "content"}
 <div class="section-head"><h2>Sipariş #{$id}</h2><a class="more" href="/admin/orders">&larr; Siparişler</a></div>
-<p class="muted">E-posta: {$email} &middot; Durum: {$status} &middot; Toplam: <b>{$total} &#8378;</b></p>
+<p class="muted">E-posta: {$email} &middot; Toplam: <b>{$total} &#8378;</b></p>
+<form method="post" action="/admin/order/{$id}/status" class="status-form">
+  <label>Durum
+    <select name="status">{!$status_options}</select>
+  </label>
+  <button>Güncelle</button>
+</form>
 <table>
 <thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th></tr></thead>
 <tbody>{!$items}</tbody>
