@@ -60,8 +60,15 @@
  .status-form{display:flex;gap:10px;align-items:flex-end;margin:14px 0}
  .status-form select{width:auto;min-width:150px}
  .status-form button{white-space:nowrap}
+ .nav-search{flex:1;max-width:280px;margin:0 16px}
+ .nav-search input{width:100%;padding:7px 12px;border:1px solid var(--line);border-radius:20px;font-size:14px}
+ .search-page{display:flex;gap:10px;margin:12px 0 4px;max-width:480px}
+ .search-page input{flex:1}
+ @media(max-width:600px){.nav-search{display:none}}
 </style></head>
 <body>
-<header><h1><a href="/">LookPress</a></h1><nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
+<header><h1><a href="/">LookPress</a></h1>
+<form method="get" action="/search" class="nav-search"><input type="search" name="q" placeholder="Ara…"></form>
+<nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
 <main>{#block "content"}{/block}</main>
 </body></html>

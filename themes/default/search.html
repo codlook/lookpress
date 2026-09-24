@@ -1,0 +1,9 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Arama <span class="muted">({$count})</span></h2>
+<form method="get" action="/search" class="search-page">
+  <input type="search" name="q" value="{$q}" placeholder="Ürün, yazı, sayfa ara…">
+  <button>Ara</button>
+</form>
+<ul class="pages">{!$results}</ul>
+{/block}

@@ -506,6 +506,25 @@ route("GET", "/media/{name}", function() {
 // use()) on purpose: a VM bug wraps a `use()`-captured loop-local in a single-element
 // array at request time (see FRICTION_phase1.md #3, core candidate); auto-capture is
 // clean. Sorted by url_pattern length DESC so the bare "/{slug}" catch-all is LAST.
+// ── search (SQL LIKE across published content; FTS5 is the measured next step) ─
+route("GET", "/search", function() {
+    $c = conn();
+    $q = request::get("q") ?? "";
+    $q = string::trim($q);
+    $results = ""; $count = 0;
+    if ($q != "") {
+        $like = "%" . $q . "%";
+        $rows = db::query($c, "SELECT c.type, c.slug, r.title, ct.url_pattern FROM content c JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0 AND (r.title LIKE ? OR r.body_md LIKE ?) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50", [$like, $like]);
+        $count = count($rows);
+        foreach ($rows as $r) {
+            $url = string::replace($r["url_pattern"], "{slug}", $r["slug"]);
+            $results = $results . "<li><a href=\"" . html::escape($url) . "\">" . html::escape($r["title"]) . "</a> <span class=\"muted\">(" . html::escape($r["type"]) . ")</span></li>";
+        }
+        if ($results == "") { $results = "<li class=\"muted\">\"" . html::escape($q) . "\" için sonuç yok.</li>"; }
+    }
+    return response::html(view("search.html", ["q" => $q, "count" => $count, "results" => $results]));
+});
+
 // ── cart (dynamic island) — session-backed, per visitor. MUST precede /{a}. ──
 // Commerce as an extension of the type engine: a Product is catalog data (②),
 // the cart is a live island (③). No payment here (that is a Phase-6 package).
