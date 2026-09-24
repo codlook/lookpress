@@ -1,0 +1,10 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>Sepet <span class="muted">({$count})</span></h2>
+<table>
+<thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th><th>Tutar</th><th></th></tr></thead>
+<tbody>{!$rows}</tbody>
+</table>
+<p class="cart-total">Toplam: <b>{$total} &#8378;</b></p>
+<form method="post" action="/checkout"><button>Ödemeye geç</button></form>
+{/block}

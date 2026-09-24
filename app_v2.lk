@@ -368,6 +368,16 @@ function render_published($type, $slug) {
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0", [$type, $slug]);
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
+    // Commerce signal: any type that declares a non-empty `price` gets an
+    // add-to-cart button (the cart is a dynamic island, session-backed).
+    $vals = json::decode($rows[0]["fields_json"]);
+    $price = "";
+    if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
+    if ($price != null) {
+        if ($price != "") {
+            $extra = $extra . "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($slug) . "\"><button>Sepete ekle</button></form>";
+        }
+    }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra]));
 }
 
@@ -496,6 +506,72 @@ route("GET", "/media/{name}", function() {
 // use()) on purpose: a VM bug wraps a `use()`-captured loop-local in a single-element
 // array at request time (see FRICTION_phase1.md #3, core candidate); auto-capture is
 // clean. Sorted by url_pattern length DESC so the bare "/{slug}" catch-all is LAST.
+// ── cart (dynamic island) — session-backed, per visitor. MUST precede /{a}. ──
+// Commerce as an extension of the type engine: a Product is catalog data (②),
+// the cart is a live island (③). No payment here (that is a Phase-6 package).
+function cart_get() {
+    session::start();
+    $raw = session::get("cart");
+    if ($raw == null) { return []; }
+    if ($raw == "") { return []; }
+    $parsed = json::decode($raw);
+    if ($parsed == null) { return []; }
+    return $parsed;
+}
+function cart_save($cart) { session::start(); session::set("cart", json::encode($cart)); }
+
+route("POST", "/cart/add", function() {
+    $c = conn();
+    $slug = request::post("slug");
+    $rows = db::query($c, "SELECT r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
+    if (count($rows) == 0) { return response::redirect("/product"); }
+    $vals = json::decode($rows[0]["fields_json"]);
+    $price = "0";
+    if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = "0"; } }
+    if ($price == null) { $price = "0"; }
+    $cart = cart_get();
+    $new = []; $found = false;
+    foreach ($cart as $it) {
+        if ($it["slug"] == $slug) { $it["qty"] = $it["qty"] + 1; $found = true; }
+        $new = array::push($new, $it);
+    }
+    if (!$found) {
+        $new = array::push($new, ["slug" => $slug, "title" => $rows[0]["title"], "price" => $price, "qty" => 1]);
+    }
+    cart_save($new);
+    return response::redirect("/cart");
+});
+
+route("POST", "/cart/remove", function() {
+    $slug = request::post("slug");
+    $cart = cart_get();
+    $new = [];
+    foreach ($cart as $it) { if ($it["slug"] != $slug) { $new = array::push($new, $it); } }
+    cart_save($new);
+    return response::redirect("/cart");
+});
+
+route("GET", "/cart", function() {
+    $cart = cart_get();
+    $rows_html = ""; $total = 0.0;
+    foreach ($cart as $it) {
+        $line = type::to_float($it["price"]) * $it["qty"];
+        $total = $total + $line;
+        $rows_html = $rows_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td><td>" . $line . " &#8378;</td><td><form method=\"post\" action=\"/cart/remove\" class=\"inline\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($it["slug"]) . "\"><button class=\"del\">&times;</button></form></td></tr>";
+    }
+    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"5\" class=\"muted\">Sepetiniz boş.</td></tr>"; }
+    return response::html(view("cart.html", ["rows" => $rows_html, "total" => $total, "count" => count($cart)]));
+});
+
+route("POST", "/checkout", function() {
+    // Demo checkout: no payment (Phase 6 = paytr/iyzico packages). Clears the cart
+    // and confirms — proves the order flow end to end without a provider.
+    $cart = cart_get();
+    if (count($cart) == 0) { return response::redirect("/cart"); }
+    cart_save([]);
+    return response::html(view("checkout.html", ["count" => count($cart)]));
+});
+
 // ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────
 // A new type auto-routes with NO restart: url_patterns are resolved from the DB at
 // REQUEST time (where db:: works — the setup pass does not, see FRICTION #3a), and
