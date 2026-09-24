@@ -51,10 +51,24 @@ function setting_set($c, $key, $val) {
 function settings_bust() { cache::delete("core:settings"); }
 function site_title() { return setting_get(conn(), "site_title", "LookPress"); }
 
-// Inject the site title into every rendered view (the header/title read it).
+// Inject the site title into every rendered view (the header/title read it), and
+// default head_extra (SEO meta/JSON-LD) so the layout <head> always resolves it.
 function view($tpl, $data) {
     $data["site_title"] = site_title();
+    if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
     return template::render("themes/default/" . $tpl, $data);
+}
+
+// ── SEO: per-page meta + Open Graph + JSON-LD (Product schema for priced items) ─
+// The site renders dynamically, so a product's JSON-LD price is always fresh (the
+// static-build "SEO-visible dynamic" staleness only bites once ③ ships).
+function seo_head($title, $desc, $ogtype, $jsonld) {
+    $out = "<meta name=\"description\" content=\"" . html::escape($desc) . "\">";
+    $out = $out . "<meta property=\"og:title\" content=\"" . html::escape($title) . "\">";
+    $out = $out . "<meta property=\"og:description\" content=\"" . html::escape($desc) . "\">";
+    $out = $out . "<meta property=\"og:type\" content=\"" . html::escape($ogtype) . "\">";
+    if ($jsonld != "") { $out = $out . "<script type=\"application/ld+json\">" . $jsonld . "</script>"; }
+    return $out;
 }
 // Auth: real users (PBKDF2 via auth::), session-backed. is_admin() = any logged-in
 // user may reach the admin; is_super() (role 'admin') gates user management.
@@ -426,7 +440,19 @@ function render_published($type, $slug) {
             $extra = $extra . "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($slug) . "\"><button>Sepete ekle</button></form>";
         }
     }
-    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra]));
+    // SEO: meta description from the body + Product JSON-LD when priced.
+    $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155);
+    $jsonld = "";
+    if ($price != null) {
+        if ($price != "") {
+            $ld = ["@context" => "https://schema.org", "@type" => "Product",
+                   "name" => $rows[0]["title"], "description" => $desc,
+                   "offers" => ["@type" => "Offer", "price" => $price, "priceCurrency" => "TRY", "availability" => "https://schema.org/InStock"]];
+            $jsonld = json::encode($ld);
+        }
+    }
+    $head = seo_head($rows[0]["title"], $desc, "website", $jsonld);
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra, "head_extra" => $head]));
 }
 
 // ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────
