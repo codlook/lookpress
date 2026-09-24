@@ -312,7 +312,7 @@ route("GET", "/admin/type/{type}/new", function() {
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
     $form = fields_form_html($c, $t["fields"], null);
-    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "errors" => []]));
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "errors" => []]));
 });
 
 route("POST", "/admin/type/{type}/new", function() {
@@ -326,7 +326,7 @@ route("POST", "/admin/type/{type}/new", function() {
     if ($slug == "") { $errs = array::push($errs, "slug is required"); }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
     }
     save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"));
     return response::redirect("/admin/type/" . $t["slug"]);
@@ -341,7 +341,7 @@ route("GET", "/admin/type/{type}/edit/{id}", function() {
     if (count($rows) == 0) { return response::status(404, "No such item"); }
     $vals = json::decode($rows[0]["fields_json"]);
     $form = fields_form_html($c, $t["fields"], $vals);
-    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "errors" => []]));
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "errors" => []]));
 });
 
 route("POST", "/admin/type/{type}/edit/{id}", function() {
@@ -353,7 +353,7 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
     $slug = string::trim(request::post("slug"));
     if (count($v["errors"]) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $v["errors"]]));
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $v["errors"]]));
     }
     save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"));
     return response::redirect("/admin/type/" . $t["slug"]);
@@ -365,6 +365,40 @@ route("POST", "/admin/type/{type}/delete/{id}", function() {
     db::exec($c, "DELETE FROM revisions WHERE content_id = ?", [request::param("id")]);
     db::exec($c, "DELETE FROM content WHERE id = ?", [request::param("id")]);
     return response::redirect("/admin/type/" . request::param("type"));
+});
+
+// ── revision history + rollback (versioned core: rollback = a pointer move) ───
+route("GET", "/admin/type/{type}/history/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $type = request::param("type");
+    $cont = db::query($c, "SELECT current_rev, slug FROM content WHERE id = ?", [$id]);
+    if (count($cont) == 0) { return response::status(404, view("notfound.html", [])); }
+    $cur = type::to_int($cont[0]["current_rev"]);
+    $revs = db::query($c, "SELECT id, rev_no, title, note FROM revisions WHERE content_id = ? ORDER BY rev_no DESC", [$id]);
+    $rows = "";
+    foreach ($revs as $r) {
+        $badge = ""; $btn = "<form method=\"post\" action=\"/admin/type/" . $type . "/rollback/" . $id . "\" class=\"inline\"><input type=\"hidden\" name=\"rev\" value=\"" . $r["id"] . "\"><button>Bu sürüme dön</button></form>";
+        if (type::to_int($r["id"]) == $cur) { $badge = " <span class=\"badge\">güncel</span>"; $btn = ""; }
+        $rows = $rows . "<tr><td>#" . $r["rev_no"] . $badge . "</td><td>" . html::escape($r["title"]) . "</td><td>" . html::escape($r["note"]) . "</td><td>" . $btn . "</td></tr>";
+    }
+    return response::html(view("admin_history.html", ["type" => $type, "id" => $id, "slug" => $cont[0]["slug"], "rows" => $rows, "count" => count($revs)]));
+});
+route("POST", "/admin/type/{type}/rollback/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $rev = request::post("rev");
+    // Validate the revision belongs to this content, then repoint (no data rewrite).
+    $chk = db::query($c, "SELECT id FROM revisions WHERE id = ? AND content_id = ?", [$rev, $id]);
+    if (count($chk) == 1) {
+        $cont = db::query($c, "SELECT status FROM content WHERE id = ?", [$id]);
+        $pub = 0;
+        if (count($cont) == 1) { if ($cont[0]["status"] == "published") { $pub = $rev; } }
+        db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ?, updated_at = ? WHERE id = ?", [$rev, $pub, date::timestamp(), $id]);
+    }
+    return response::redirect("/admin/type/" . request::param("type") . "/history/" . $id);
 });
 
 // ── JSON API — published_rev ONLY (read-surface invariant) ────────────────────

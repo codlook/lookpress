@@ -8,5 +8,6 @@
 <label>Status <select name="status"><option value="draft">draft</option><option value="published">published</option></select></label>
 <button type="submit">Save</button>
 <a class="muted" href="/admin/type/{$type.slug}" style="margin-left:12px">Cancel</a>
+{#if $content_id}<a class="muted" href="/admin/type/{$type.slug}/history/{$content_id}" style="margin-left:12px">Sürüm geçmişi</a>{/if}
 </form>
 {/block}
