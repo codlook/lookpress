@@ -790,12 +790,14 @@ route("POST", "/checkout", function() {
     $c = conn();
     $cart = cart_get();
     if (count($cart) == 0) { return response::redirect("/cart"); }
-    $email = request::post("email");
-    if ($email == null) { $email = ""; }
+    $email = request::post("email"); if ($email == null) { $email = ""; }
+    $cust_name = request::post("cust_name"); if ($cust_name == null) { $cust_name = ""; }
+    $address = request::post("address"); if ($address == null) { $address = ""; }
+    $phone = request::post("phone"); if ($phone == null) { $phone = ""; }
     $total = 0.0;
     foreach ($cart as $it) { $total = $total + type::to_float($it["price"]) * $it["qty"]; }
     $ts = date::timestamp();
-    db::exec($c, "INSERT INTO orders (email, total, status, created_at) VALUES (?, ?, 'received', ?)", [$email, "" . $total, $ts]);
+    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, total, status, created_at) VALUES (?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, "" . $total, $ts]);
     $oid = db::last_id($c);
     foreach ($cart as $it) {
         db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty) VALUES (?, ?, ?, ?, ?)", [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"]]);
@@ -823,7 +825,7 @@ route("GET", "/admin/order/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     $c = conn();
     $id = request::param("id");
-    $orows = db::query($c, "SELECT id, email, total, status FROM orders WHERE id = ?", [$id]);
+    $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
     if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
     $o = $orows[0];
     $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
@@ -840,7 +842,10 @@ route("GET", "/admin/order/{id}", function() {
         if ($st == $o["status"]) { $selattr = " selected"; }
         $sel = $sel . "<option value=\"" . $st . "\"" . $selattr . ">" . $st . "</option>";
     }
-    return response::html(view("admin_order.html", ["id" => $o["id"], "email" => $mail, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
+    $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+    $addr = $o["address"]; if ($addr == null) { $addr = ""; } if ($addr == "") { $addr = "—"; }
+    $ph = $o["phone"]; if ($ph == null) { $ph = ""; } if ($ph == "") { $ph = "—"; }
+    return response::html(view("admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
 });
 route("POST", "/admin/order/{id}/status", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }

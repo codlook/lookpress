@@ -86,6 +86,18 @@ migrate_run($c, $migrations);
 db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_lang_type_slug ON content(lang, type, slug)", []);
 db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_ns_key ON settings(ns, skey)", []);
 
+// Idempotent column add (SQLite has no ADD COLUMN IF NOT EXISTS) — a small
+// migration primitive so tables can grow columns on later releases safely.
+function ensure_column($c, $table, $col, $decl) {
+    $info = db::query($c, "PRAGMA table_info(" . $table . ")", []);
+    $found = false;
+    foreach ($info as $ci) { if ($ci["name"] == $col) { $found = true; } }
+    if (!$found) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
+}
+ensure_column($c, "orders", "cust_name", "VARCHAR(120) DEFAULT ''");
+ensure_column($c, "orders", "address",   "TEXT DEFAULT ''");
+ensure_column($c, "orders", "phone",     "VARCHAR(40) DEFAULT ''");
+
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
 // /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently
