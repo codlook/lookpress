@@ -15,6 +15,7 @@ use file;
 use json;
 use html;
 use log;
+use auth;
 use "lib/markdown.lk";
 
 // Fail-loud on an unset admin password (philosophy: nothing hidden). Login is
@@ -25,7 +26,10 @@ if (env("ADMIN_PASSWORD", "") == "") {
 
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
 function view($tpl, $data) { return template::render("themes/default/" . $tpl, $data); }
-function is_admin() { session::start(); return session::get("admin") == "1"; }
+// Auth: real users (PBKDF2 via auth::), session-backed. is_admin() = any logged-in
+// user may reach the admin; is_super() (role 'admin') gates user management.
+function is_admin() { session::start(); return session::get("uid") != null; }
+function is_super() { session::start(); return session::get("role") == "admin"; }
 
 // ── dispatcher type-pattern cache ────────────────────────────────────────────
 // The request-time dispatcher resolves url_pattern -> type slug on EVERY public hit.
@@ -172,24 +176,38 @@ function save_content($c, $type, $id, $slug, $values, $status) {
 // ── admin auth ───────────────────────────────────────────────────────────────
 route("GET", "/admin/login", function() { return response::html(view("login.html", ["error" => ""])); });
 route("POST", "/admin/login", function() {
-    // No silent default: an unset ADMIN_PASSWORD DISABLES login (never matches),
-    // rather than shipping a known "changeme" backdoor. Empty post is also refused.
-    $pw = env("ADMIN_PASSWORD", "");
-    $given = request::post("password");
-    if ($pw != "" && $given != "" && crypto::constant_compare($given, $pw)) {
-        session::start(); session::regenerate(); session::set("admin", "1");
-        return response::redirect("/admin");
+    $c = conn();
+    $u = request::post("username");
+    $p = request::post("password");
+    if ($u != null) {
+        if ($p != null) {
+            if ($u != "" && $p != "") {
+                $rows = db::query($c, "SELECT id, password_hash, role FROM users WHERE username = ?", [$u]);
+                if (count($rows) == 1) {
+                    if (auth::verify($p, $rows[0]["password_hash"])) {
+                        session::start(); session::regenerate();
+                        session::set("uid", "" . $rows[0]["id"]);
+                        session::set("uname", $u);
+                        session::set("role", $rows[0]["role"]);
+                        return response::redirect("/admin");
+                    }
+                }
+            }
+        }
     }
-    return response::html(view("login.html", ["error" => "Wrong password."]));
+    return response::html(view("login.html", ["error" => "Kullanıcı adı ya da şifre hatalı."]));
 });
 route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
 
 // Admin dashboard: list the types (the engine's entry point).
 route("GET", "/admin", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
+    session::start();
     $c = conn();
     $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
-    return response::html(view("admin_types.html", ["types" => $types]));
+    $uname = session::get("uname");
+    if ($uname == null) { $uname = ""; }
+    return response::html(view("admin_types.html", ["types" => $types, "uname" => $uname, "is_super" => is_super()]));
 });
 
 // ── type-admin: create a content type from the admin (closes Step 3's gate) ──
@@ -651,6 +669,39 @@ route("POST", "/admin/order/{id}/status", function() {
         db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
     }
     return response::redirect("/admin/order/" . $id);
+});
+
+// ── admin: users (role 'admin' only — RBAC) ──────────────────────────────────
+route("GET", "/admin/users", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "Bu sayfa yalnız admin rolü içindir."); }
+    $c = conn();
+    $users = db::query($c, "SELECT username, role FROM users ORDER BY id", []);
+    $rows = "";
+    foreach ($users as $u) {
+        $rows = $rows . "<tr><td>" . html::escape($u["username"]) . "</td><td>" . html::escape($u["role"]) . "</td></tr>";
+    }
+    return response::html(view("admin_users.html", ["rows" => $rows, "count" => count($users)]));
+});
+route("POST", "/admin/users/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $u = string::trim(request::post("username"));
+    $p = request::post("password");
+    $role = request::post("role");
+    if ($role != "admin") { $role = "editor"; }
+    if ($u != "") {
+        if ($p != null) {
+            if ($p != "") {
+                $exists = db::query($c, "SELECT id FROM users WHERE username = ?", [$u]);
+                if (count($exists) == 0) {
+                    db::exec($c, "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)", [$u, auth::hash($p), $role, date::timestamp()]);
+                }
+            }
+        }
+    }
+    return response::redirect("/admin/users");
 });
 
 // ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────

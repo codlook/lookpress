@@ -1,0 +1,17 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<div class="section-head"><h2>Kullanıcılar <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
+<table>
+<thead><tr><th>Kullanıcı adı</th><th>Rol</th></tr></thead>
+<tbody>{!$rows}</tbody>
+</table>
+<h3>Yeni kullanıcı</h3>
+<form method="post" action="/admin/users/new" class="user-form">
+  <label>Kullanıcı adı <input type="text" name="username" required></label>
+  <label>Şifre <input type="password" name="password" required></label>
+  <label>Rol
+    <select name="role"><option value="editor">editor</option><option value="admin">admin</option></select>
+  </label>
+  <button type="submit">Ekle</button>
+</form>
+{/block}

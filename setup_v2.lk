@@ -8,6 +8,7 @@ use json;
 use date;
 use type;
 use string;
+use auth;
 
 $c = db::connect(env("DB_DSN"));
 
@@ -57,6 +58,13 @@ $migrations = [
         "title"    => "string(200)",
         "price"    => "string(40)",
         "qty"      => "int default=1"
+    ]],
+    ["id" => "v2_0006_users", "create_table" => "users", "columns" => [
+        "id"            => "pk",
+        "username"      => "string(80) unique",
+        "password_hash" => "text",
+        "role"          => "string(20) default=editor",
+        "created_at"    => "int default=0"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -85,6 +93,20 @@ $common = [
 ];
 seed_type($c, "page", "Page", "/{slug}",       $common);
 seed_type($c, "post", "Post", "/blog/{slug}",  $common);
+
+// ── seed the first admin user (once) from ADMIN_PASSWORD ──────────────────────
+// The env var is the SEED password for the initial `admin` account; change it
+// afterwards from /admin/users. If ADMIN_PASSWORD is unset, no admin is seeded
+// (fail-loud — admin login stays disabled until a user exists).
+$has_user = db::query($c, "SELECT id FROM users LIMIT 1", []);
+if (count($has_user) == 0) {
+    $seedpw = env("ADMIN_PASSWORD", "");
+    if ($seedpw != "") {
+        db::exec($c, "INSERT INTO users (username, password_hash, role, created_at) VALUES ('admin', ?, 'admin', ?)",
+            [auth::hash($seedpw), date::timestamp()]);
+        print("=== seeded admin user (username: admin) ===\n");
+    }
+}
 
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {
