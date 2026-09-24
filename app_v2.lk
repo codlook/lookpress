@@ -49,6 +49,9 @@ function type_for_pattern($c, $pattern) {
     return "";
 }
 function types_cache_bust() { cache::delete("cms:type_patterns"); }
+// Any type whose url_pattern is "/BASE/{slug}" is browsable as a listing at /BASE
+// (e.g. product -> /product, post -> /blog). Generic: no per-type listing code.
+function type_for_base($c, $base) { return type_for_pattern($c, $base . "/{slug}"); }
 
 // ── type engine: load a type + its field defs ───────────────────────────────
 function load_type($c, $slug) {
@@ -367,6 +370,35 @@ function render_published($type, $slug) {
     $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra]));
 }
+
+// ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────
+// Published items as cards; a card shows the item's image + price when the type
+// declares those fields (so /product is a shop grid, /blog-like types a list).
+function render_listing($c, $type) {
+    $t = load_type($c, $type);
+    if ($t == null) { return response::status(404, view("notfound.html", [])); }
+    $base = string::replace($t["url_pattern"], "/{slug}", "");
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type]);
+    $cards = "";
+    foreach ($rows as $it) {
+        $vals = json::decode($it["fields_json"]);
+        $img = ""; $price = "";
+        if ($vals != null) {
+            try { $img = $vals["image"]; } catch ($e) { $img = ""; }
+            try { $price = $vals["price"]; } catch ($e) { $price = ""; }
+        }
+        if ($img == null) { $img = ""; }
+        if ($price == null) { $price = ""; }
+        $imgh = "";
+        if ($img != "") { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($img) . "\" alt=\"\"></span>"; }
+        $priceh = "";
+        if ($price != "") { $priceh = "<div class=\"card-price\">" . html::escape($price) . " &#8378;</div>"; }
+        $url = $base . "/" . $it["slug"];
+        $cards = $cards . "<a class=\"card\" href=\"" . html::escape($url) . "\">" . $imgh . "<div class=\"card-body\"><div class=\"card-title\">" . html::escape($it["title"]) . "</div>" . $priceh . "</div></a>";
+    }
+    if ($cards == "") { $cards = "<p class=\"muted\">No published items yet.</p>"; }
+    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "cards" => $cards]));
+}
 // ── v1 parity: home + blog index (paginated) + media library ─────────────────
 // Specific routes — MUST be registered BEFORE the generic dispatcher catch-alls below
 // (route-shadow: first-match wins). Blog posts are versioned content of type 'post';
@@ -465,9 +497,17 @@ route("GET", "/media/{name}", function() {
 //                          product: /blog/{slug}, /products/{slug}), slug=b
 route("GET", "/{a}", function() {
     $c = conn();
-    $slug = type_for_pattern($c, "/{slug}");           // cached (60s, busted on type write)
-    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
-    return render_published($slug, request::param("a"));
+    $a = request::param("a");
+    // 1) a published page at /{slug}?
+    $page = type_for_pattern($c, "/{slug}");           // cached (60s, busted on type write)
+    if ($page != "") {
+        $hit = db::query($c, "SELECT 1 AS x FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0", [$page, $a]);
+        if (count($hit) > 0) { return render_published($page, $a); }
+    }
+    // 2) /{a} as a type LISTING (a type whose url_pattern is "/{a}/{slug}")
+    $lt = type_for_base($c, "/" . $a);
+    if ($lt != "") { return render_listing($c, $lt); }
+    return response::status(404, view("notfound.html", []));
 });
 route("GET", "/{a}/{b}", function() {
     $c = conn();
