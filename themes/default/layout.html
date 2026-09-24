@@ -66,10 +66,14 @@
  .search-page{display:flex;gap:10px;margin:12px 0 4px;max-width:480px}
  .search-page input{flex:1}
  @media(max-width:600px){.nav-search{display:none}}
+ .hp{position:absolute!important;left:-9999px!important;width:1px;height:1px;opacity:0}
+ .contact-form{max-width:520px}
+ .contact-form button{margin-top:8px}
+ .sent-ok{background:#e6f5ee;color:#0d7d63;padding:12px 16px;border-radius:8px;margin:12px 0}
 </style></head>
 <body>
 <header><h1><a href="/">{$site_title}</a></h1>
 <form method="get" action="/search" class="nav-search"><input type="search" name="q" placeholder="Ara…"></form>
-<nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
+<nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/contact">İletişim</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
 <main>{#block "content"}{/block}</main>
 </body></html>

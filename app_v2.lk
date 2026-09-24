@@ -600,6 +600,47 @@ route("GET", "/search", function() {
     return response::html(view("search.html", ["q" => $q, "count" => $count, "results" => $results]));
 });
 
+// ── forms (contact/lead → stored submissions; honeypot spam guard) ───────────
+route("GET", "/contact", function() {
+    $sent = request::get("sent") ?? "";
+    return response::html(view("contact.html", ["sent" => $sent]));
+});
+route("POST", "/forms/{key}", function() {
+    $c = conn();
+    $key = request::param("key");
+    // Honeypot: a hidden "website" field bots fill and humans never see. If set,
+    // silently accept-and-drop (don't tell the bot it failed).
+    $hp = request::post("website");
+    if ($hp != null) { if ($hp != "") { return response::redirect("/contact?sent=1"); } }
+    $name = request::post("name"); if ($name == null) { $name = ""; }
+    $email = request::post("email"); if ($email == null) { $email = ""; }
+    $message = request::post("message"); if ($message == null) { $message = ""; }
+    $data = ["name" => $name, "email" => $email, "message" => $message];
+    db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);
+    return response::redirect("/contact?sent=1");
+});
+route("GET", "/admin/forms", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $subs = db::query($c, "SELECT form_key, data_json FROM form_submissions ORDER BY id DESC LIMIT 200", []);
+    $rows = "";
+    foreach ($subs as $sub) {
+        $d = json::decode($sub["data_json"]);
+        $name = ""; $email = ""; $msg = "";
+        if ($d != null) {
+            try { $name = $d["name"]; } catch ($e) { $name = ""; }
+            try { $email = $d["email"]; } catch ($e) { $email = ""; }
+            try { $msg = $d["message"]; } catch ($e) { $msg = ""; }
+        }
+        if ($name == null) { $name = ""; }
+        if ($email == null) { $email = ""; }
+        if ($msg == null) { $msg = ""; }
+        $rows = $rows . "<tr><td>" . html::escape($sub["form_key"]) . "</td><td>" . html::escape($name) . "</td><td>" . html::escape($email) . "</td><td>" . html::escape($msg) . "</td></tr>";
+    }
+    if ($rows == "") { $rows = "<tr><td colspan=\"4\" class=\"muted\">Henüz gönderim yok.</td></tr>"; }
+    return response::html(view("admin_forms.html", ["rows" => $rows, "count" => count($subs)]));
+});
+
 // ── cart (dynamic island) — session-backed, per visitor. MUST precede /{a}. ──
 // Commerce as an extension of the type engine: a Product is catalog data (②),
 // the cart is a live island (③). No payment here (that is a Phase-6 package).

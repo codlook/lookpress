@@ -71,6 +71,12 @@ $migrations = [
         "ns"   => "string(40)",
         "skey" => "string(80)",
         "sval" => "text"
+    ]],
+    ["id" => "v2_0008_form_submissions", "create_table" => "form_submissions", "columns" => [
+        "id"         => "pk",
+        "form_key"   => "string(80)",
+        "data_json"  => "text",
+        "created_at" => "int default=0"
     ]]
 ];
 migrate_run($c, $migrations);

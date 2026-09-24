@@ -1,0 +1,12 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<h2>İletişim</h2>
+{#if $sent}<p class="sent-ok">Mesajınız alındı, teşekkürler. En kısa sürede dönüş yaparız.</p>{/if}
+<form method="post" action="/forms/contact" class="contact-form">
+  <label>Adınız <input type="text" name="name" required></label>
+  <label>E-posta <input type="email" name="email" required></label>
+  <label>Mesaj <textarea name="message" rows="5" required></textarea></label>
+  <input type="text" name="website" class="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+  <button type="submit">Gönder</button>
+</form>
+{/block}
