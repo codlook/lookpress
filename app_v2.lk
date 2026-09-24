@@ -50,11 +50,13 @@ function setting_set($c, $key, $val) {
 }
 function settings_bust() { cache::delete("core:settings"); }
 function site_title() { return setting_get(conn(), "site_title", "LookPress"); }
+function active_theme() { return setting_get(conn(), "theme", "default"); }
 
-// Inject the site title into every rendered view (the header/title read it), and
-// default head_extra (SEO meta/JSON-LD) so the layout <head> always resolves it.
+// Inject the site title + active theme (skin) into every rendered view, and default
+// head_extra (SEO meta/JSON-LD) so the layout <head> always resolves it.
 function view($tpl, $data) {
     $data["site_title"] = site_title();
+    $data["theme"] = active_theme();
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
     return template::render("themes/default/" . $tpl, $data);
 }
@@ -807,10 +809,19 @@ route("GET", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!is_super()) { return response::status(403, "admin only"); }
     $c = conn();
+    $cur = setting_get($c, "theme", "default");
+    $themes = ["default", "ocean", "sunset", "dark"];
+    $topts = "";
+    foreach ($themes as $th) {
+        $sa = "";
+        if ($th == $cur) { $sa = " selected"; }
+        $topts = $topts . "<option value=\"" . $th . "\"" . $sa . ">" . $th . "</option>";
+    }
     return response::html(view("admin_settings.html", [
         "s_title"    => setting_get($c, "site_title", "LookPress"),
         "s_tagline"  => setting_get($c, "tagline", ""),
-        "s_currency" => setting_get($c, "currency", "&#8378;")
+        "s_currency" => setting_get($c, "currency", "&#8378;"),
+        "theme_options" => $topts
     ]));
 });
 route("POST", "/admin/settings", function() {
@@ -820,6 +831,9 @@ route("POST", "/admin/settings", function() {
     setting_set($c, "site_title", string::trim(request::post("site_title")));
     setting_set($c, "tagline", string::trim(request::post("tagline")));
     setting_set($c, "currency", string::trim(request::post("currency")));
+    $th = request::post("theme");
+    $allowed_themes = ["default", "ocean", "sunset", "dark"];
+    if (array::contains($allowed_themes, $th)) { setting_set($c, "theme", $th); }
     settings_bust();
     return response::redirect("/admin/settings");
 });
