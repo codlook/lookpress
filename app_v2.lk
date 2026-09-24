@@ -315,6 +315,11 @@ route("GET", "/admin/type/{type}/new", function() {
     return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "errors" => []]));
 });
 
+// A slug is unique per (lang, type); reject a collision gracefully instead of
+// letting the UNIQUE constraint 500 the edit form.
+function slug_taken($c, $type, $slug, $exclude_id) {
+    return count(db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = 'tr' AND id != ?", [$type, $slug, $exclude_id])) > 0;
+}
 route("POST", "/admin/type/{type}/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     $c = conn();
@@ -324,6 +329,7 @@ route("POST", "/admin/type/{type}/new", function() {
     $slug = string::trim(request::post("slug"));
     $errs = $v["errors"];
     if ($slug == "") { $errs = array::push($errs, "slug is required"); }
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, 0)) { $errs = array::push($errs, "bu slug zaten kullanımda"); } }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
         return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
@@ -351,9 +357,11 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
     if ($t == null) { return response::status(404, "No such type"); }
     $v = validate_post($c, $t["fields"]);
     $slug = string::trim(request::post("slug"));
-    if (count($v["errors"]) > 0) {
+    $errs = $v["errors"];
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, type::to_int(request::param("id")))) { $errs = array::push($errs, "bu slug zaten kullanımda"); } }
+    if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $v["errors"]]));
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
     }
     save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"));
     return response::redirect("/admin/type/" . $t["slug"]);
