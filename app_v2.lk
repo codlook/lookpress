@@ -374,11 +374,8 @@ function render_published($type, $slug) {
 // ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────
 // Published items as cards; a card shows the item's image + price when the type
 // declares those fields (so /product is a shop grid, /blog-like types a list).
-function render_listing($c, $type) {
-    $t = load_type($c, $type);
-    if ($t == null) { return response::status(404, view("notfound.html", [])); }
-    $base = string::replace($t["url_pattern"], "/{slug}", "");
-    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type]);
+// shared card builder — used by the catalog listing AND the home showcase.
+function cards_html($base, $rows) {
     $cards = "";
     foreach ($rows as $it) {
         $vals = json::decode($it["fields_json"]);
@@ -396,6 +393,14 @@ function render_listing($c, $type) {
         $url = $base . "/" . $it["slug"];
         $cards = $cards . "<a class=\"card\" href=\"" . html::escape($url) . "\">" . $imgh . "<div class=\"card-body\"><div class=\"card-title\">" . html::escape($it["title"]) . "</div>" . $priceh . "</div></a>";
     }
+    return $cards;
+}
+function render_listing($c, $type) {
+    $t = load_type($c, $type);
+    if ($t == null) { return response::status(404, view("notfound.html", [])); }
+    $base = string::replace($t["url_pattern"], "/{slug}", "");
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type]);
+    $cards = cards_html($base, $rows);
     if ($cards == "") { $cards = "<p class=\"muted\">No published items yet.</p>"; }
     return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "cards" => $cards]));
 }
@@ -408,8 +413,15 @@ function render_listing($c, $type) {
 // Home — published pages, alphabetical (v1 "/" parity, on the versioned core).
 route("GET", "/", function() {
     $c = conn();
-    $pages = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'page' AND c.published_rev > 0 ORDER BY r.title", []);
-    return response::html(view("home.html", ["pages" => $pages]));
+    // Showcase landing: featured products (if any) + latest posts. Curated, so the
+    // section is built here; the template just prints the blocks.
+    $prod_rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", []);
+    $products_section = "";
+    if (count($prod_rows) > 0) {
+        $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html("/product", $prod_rows) . "</div>";
+    }
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", []);
+    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts]));
 });
 
 route("GET", "/blog", function() {

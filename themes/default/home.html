@@ -1,7 +1,12 @@
 {#extends "themes/default/layout"}
 {#block "content"}
-<h2>Pages</h2>
+<section class="hero">
+  <h1>LookPress</h1>
+  <p>Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.</p>
+</section>
+{!$products_section}
+<div class="section-head"><h2>Latest posts</h2><a class="more" href="/blog">All posts &rarr;</a></div>
 <ul class="pages">
-{#each $pages as $p}<li><a href="/{$p.slug}">{$p.title}</a></li>{/each}
+{#each $posts as $p}<li><a href="/blog/{$p.slug}">{$p.title}</a></li>{/each}
 </ul>
 {/block}
