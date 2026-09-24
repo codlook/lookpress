@@ -602,6 +602,47 @@ route("GET", "/search", function() {
     return response::html(view("search.html", ["q" => $q, "count" => $count, "results" => $results]));
 });
 
+// ── syndication + crawlability: sitemap.xml · robots.txt · RSS feed ──────────
+function base_url() {
+    $host = request::header("Host"); if ($host == null) { $host = "localhost"; }
+    $proto = request::header("X-Forwarded-Proto"); if ($proto == null) { $proto = "http"; }
+    return $proto . "://" . $host;
+}
+route("GET", "/sitemap.xml", function() {
+    $c = conn();
+    $base = base_url();
+    $rows = db::query($c, "SELECT c.slug, ct.url_pattern FROM content c JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0", []);
+    $urls = "";
+    foreach ($rows as $r) {
+        $path = string::replace($r["url_pattern"], "{slug}", $r["slug"]);
+        $urls = $urls . "<url><loc>" . html::escape($base . $path) . "</loc></url>";
+    }
+    $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">" . $urls . "</urlset>";
+    response::text($xml);
+    response::header("Content-Type", "application/xml; charset=utf-8");
+    return;
+});
+route("GET", "/robots.txt", function() {
+    response::text("User-agent: *\nAllow: /\nSitemap: " . base_url() . "/sitemap.xml\n");
+    return;
+});
+route("GET", "/feed", function() {
+    $c = conn();
+    $base = base_url();
+    $posts = db::query($c, "SELECT c.slug, r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 20", []);
+    $items = "";
+    foreach ($posts as $p) {
+        $link = $base . "/blog/" . $p["slug"];
+        $desc = string::substr(html::strip($p["body_html"]), 0, 300);
+        $items = $items . "<item><title>" . html::escape($p["title"]) . "</title><link>" . html::escape($link) . "</link><description>" . html::escape($desc) . "</description></item>";
+    }
+    $t = site_title();
+    $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel><title>" . html::escape($t) . "</title><link>" . html::escape($base) . "</link><description>" . html::escape($t) . "</description>" . $items . "</channel></rss>";
+    response::text($xml);
+    response::header("Content-Type", "application/rss+xml; charset=utf-8");
+    return;
+});
+
 // ── forms (contact/lead → stored submissions; honeypot spam guard) ───────────
 route("GET", "/contact", function() {
     $sent = request::get("sent") ?? "";
