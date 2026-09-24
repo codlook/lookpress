@@ -2,7 +2,8 @@
 {#block "content"}
 <div class="checkout-ok">
   <h2>Siparişiniz alındı ✓</h2>
-  <p class="muted">{$count} kalem işlendi. (Demo — ödeme sağlayıcısı Faz 6: paytr / iyzico paketleri.)</p>
+  <p>Sipariş no: <b>#{$order_id}</b> &middot; {$count} kalem &middot; Toplam <b>{$total} &#8378;</b></p>
+  <p class="muted">(Demo — ödeme sağlayıcısı Faz 6: paytr / iyzico paketleri.)</p>
   <p><a class="btn" href="/product">Alışverişe devam et</a></p>
 </div>
 {/block}

@@ -42,6 +42,21 @@ $migrations = [
         "label"       => "string(80)",
         "url_pattern" => "string(120)",
         "fields_json" => "text"
+    ]],
+    ["id" => "v2_0004_orders", "create_table" => "orders", "columns" => [
+        "id"         => "pk",
+        "email"      => "string(200)",
+        "total"      => "string(40)",
+        "status"     => "string(20) default=received",
+        "created_at" => "int default=0"
+    ]],
+    ["id" => "v2_0005_order_items", "create_table" => "order_items", "columns" => [
+        "id"       => "pk",
+        "order_id" => "int",
+        "slug"     => "string(200)",
+        "title"    => "string(200)",
+        "price"    => "string(40)",
+        "qty"      => "int default=1"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -97,8 +112,16 @@ function migrate_rows($c, $type, $sql, $ts_field) {
     return $diffs;
 }
 
-print("=== migrating v1 -> v2 ===\n");
-$d1 = migrate_rows($c, "page", "SELECT slug, title, body, body_html, status, updated_at FROM pages", "updated_at");
-$d2 = migrate_rows($c, "post", "SELECT slug, title, body, body_html, status, published_at FROM posts", "published_at");
-$total_diffs = $d1 + $d2;
-print("=== TOTAL body_html diffs: " . $total_diffs . " (0 = clean golden-gate migration) ===\n");
+// Idempotent: the v1->v2 ROW migration runs only when the v2 core is empty. Schema
+// migrations above are tracked (migrate_run) so they always apply safely; this guard
+// lets setup_v2 run on EVERY start (new tables land) without duplicating content.
+$existing = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content", [])[0]["n"]);
+if ($existing == 0) {
+    print("=== migrating v1 -> v2 ===\n");
+    $d1 = migrate_rows($c, "page", "SELECT slug, title, body, body_html, status, updated_at FROM pages", "updated_at");
+    $d2 = migrate_rows($c, "post", "SELECT slug, title, body, body_html, status, published_at FROM posts", "published_at");
+    $total_diffs = $d1 + $d2;
+    print("=== TOTAL body_html diffs: " . $total_diffs . " (0 = clean golden-gate migration) ===\n");
+} else {
+    print("=== v2 content present (" . $existing . " rows) — skipping v1->v2 row migration ===\n");
+}

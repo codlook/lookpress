@@ -1,7 +1,7 @@
 {#extends "themes/default/layout"}
 {#block "content"}
 <h2>Content types <a class="btn" href="/admin/types/new">+ New type</a></h2>
-<p class="muted"><a href="/admin/logout">Log out</a></p>
+<p class="muted"><a href="/admin/orders">Siparişler</a> &middot; <a href="/admin/media">Medya</a> &middot; <a href="/admin/logout">Çıkış</a></p>
 <ul class="pages">
 {#each $types as $t}<li><a href="/admin/type/{$t.slug}">{$t.label}</a> <span class="muted">({$t.slug})</span></li>{/each}
 </ul>

@@ -6,5 +6,8 @@
 <tbody>{!$rows}</tbody>
 </table>
 <p class="cart-total">Toplam: <b>{$total} &#8378;</b></p>
-<form method="post" action="/checkout"><button>Ödemeye geç</button></form>
+<form method="post" action="/checkout" class="checkout-form">
+  <input type="email" name="email" placeholder="E-posta (opsiyonel)">
+  <button>Ödemeye geç</button>
+</form>
 {/block}

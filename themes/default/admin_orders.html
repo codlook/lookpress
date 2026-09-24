@@ -1,0 +1,8 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<div class="section-head"><h2>Siparişler <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
+<table>
+<thead><tr><th>No</th><th>E-posta</th><th>Tutar</th><th>Durum</th></tr></thead>
+<tbody>{!$rows}</tbody>
+</table>
+{/block}

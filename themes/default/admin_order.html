@@ -1,0 +1,9 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<div class="section-head"><h2>Sipariş #{$id}</h2><a class="more" href="/admin/orders">&larr; Siparişler</a></div>
+<p class="muted">E-posta: {$email} &middot; Durum: {$status} &middot; Toplam: <b>{$total} &#8378;</b></p>
+<table>
+<thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th></tr></thead>
+<tbody>{!$items}</tbody>
+</table>
+{/block}

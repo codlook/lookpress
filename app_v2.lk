@@ -564,12 +564,56 @@ route("GET", "/cart", function() {
 });
 
 route("POST", "/checkout", function() {
-    // Demo checkout: no payment (Phase 6 = paytr/iyzico packages). Clears the cart
-    // and confirms — proves the order flow end to end without a provider.
+    // Demo checkout: no payment (Phase 6 = paytr/iyzico packages). Persists a real
+    // order + line items, clears the cart, confirms — the WooCommerce test's
+    // "order record" half, end to end without a provider.
+    $c = conn();
     $cart = cart_get();
     if (count($cart) == 0) { return response::redirect("/cart"); }
+    $email = request::post("email");
+    if ($email == null) { $email = ""; }
+    $total = 0.0;
+    foreach ($cart as $it) { $total = $total + type::to_float($it["price"]) * $it["qty"]; }
+    $ts = date::timestamp();
+    db::exec($c, "INSERT INTO orders (email, total, status, created_at) VALUES (?, ?, 'received', ?)", [$email, "" . $total, $ts]);
+    $oid = db::last_id($c);
+    foreach ($cart as $it) {
+        db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty) VALUES (?, ?, ?, ?, ?)", [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"]]);
+    }
+    $n = count($cart);
     cart_save([]);
-    return response::html(view("checkout.html", ["count" => count($cart)]));
+    return response::html(view("checkout.html", ["count" => $n, "order_id" => $oid, "total" => $total]));
+});
+
+// ── admin: orders ────────────────────────────────────────────────────────────
+route("GET", "/admin/orders", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
+    $rows_html = "";
+    foreach ($orders as $o) {
+        $mail = $o["email"];
+        if ($mail == "") { $mail = "—"; }
+        $rows_html = $rows_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($mail) . "</td><td>" . html::escape($o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    return response::html(view("admin_orders.html", ["rows" => $rows_html, "count" => count($orders)]));
+});
+route("GET", "/admin/order/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $orows = db::query($c, "SELECT id, email, total, status FROM orders WHERE id = ?", [$id]);
+    if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
+    $o = $orows[0];
+    $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
+    $items_html = "";
+    foreach ($items as $it) {
+        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
+    }
+    $mail = $o["email"];
+    if ($mail == "") { $mail = "—"; }
+    return response::html(view("admin_order.html", ["id" => $o["id"], "email" => $mail, "total" => $o["total"], "status" => $o["status"], "items" => $items_html]));
 });
 
 // ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────
