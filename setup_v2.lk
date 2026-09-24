@@ -65,6 +65,12 @@ $migrations = [
         "password_hash" => "text",
         "role"          => "string(20) default=editor",
         "created_at"    => "int default=0"
+    ]],
+    ["id" => "v2_0007_settings", "create_table" => "settings", "columns" => [
+        "id"   => "pk",
+        "ns"   => "string(40)",
+        "skey" => "string(80)",
+        "sval" => "text"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -72,6 +78,7 @@ migrate_run($c, $migrations);
 // share a slug (different URL namespaces). migrate has no composite-unique DSL, so
 // create it directly.
 db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_lang_type_slug ON content(lang, type, slug)", []);
+db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_ns_key ON settings(ns, skey)", []);
 
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and

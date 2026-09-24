@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LookPress</title>
+<title>{$site_title}</title>
 <style>
  :root{--fg:#1c1c1c;--muted:#666;--accent:#2d6cdf;--line:#e5e5e5;--bg:#fff}
  *{box-sizing:border-box}
@@ -67,7 +67,7 @@
  @media(max-width:600px){.nav-search{display:none}}
 </style></head>
 <body>
-<header><h1><a href="/">LookPress</a></h1>
+<header><h1><a href="/">{$site_title}</a></h1>
 <form method="get" action="/search" class="nav-search"><input type="search" name="q" placeholder="Ara…"></form>
 <nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
 <main>{#block "content"}{/block}</main>

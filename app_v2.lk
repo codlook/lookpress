@@ -25,7 +25,37 @@ if (env("ADMIN_PASSWORD", "") == "") {
 }
 
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
-function view($tpl, $data) { return template::render("themes/default/" . $tpl, $data); }
+
+// ── settings (namespaced key-value, cached) ──────────────────────────────────
+// Namespaced + lazy-cached so it never becomes the wp_options bloat: the whole
+// 'core' namespace is one cached map, read once per 60s, busted on write.
+function settings_all($c) {
+    $m = cache::get("core:settings");
+    if ($m != null) { return $m; }
+    $m = array::new_assoc();
+    $rows = db::query($c, "SELECT skey, sval FROM settings WHERE ns = 'core'", []);
+    foreach ($rows as $r) { $m = array::set($m, $r["skey"], $r["sval"]); }
+    cache::set("core:settings", $m, 60);
+    return $m;
+}
+function setting_get($c, $key, $default) {
+    $m = settings_all($c);
+    if (array::contains(array::keys($m), $key)) { return $m[$key]; }
+    return $default;
+}
+function setting_set($c, $key, $val) {
+    $ex = db::query($c, "SELECT id FROM settings WHERE ns = 'core' AND skey = ?", [$key]);
+    if (count($ex) > 0) { db::exec($c, "UPDATE settings SET sval = ? WHERE ns = 'core' AND skey = ?", [$val, $key]); }
+    else { db::exec($c, "INSERT INTO settings (ns, skey, sval) VALUES ('core', ?, ?)", [$key, $val]); }
+}
+function settings_bust() { cache::delete("core:settings"); }
+function site_title() { return setting_get(conn(), "site_title", "LookPress"); }
+
+// Inject the site title into every rendered view (the header/title read it).
+function view($tpl, $data) {
+    $data["site_title"] = site_title();
+    return template::render("themes/default/" . $tpl, $data);
+}
 // Auth: real users (PBKDF2 via auth::), session-backed. is_admin() = any logged-in
 // user may reach the admin; is_super() (role 'admin') gates user management.
 function is_admin() { session::start(); return session::get("uid") != null; }
@@ -449,7 +479,8 @@ route("GET", "/", function() {
         $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html("/product", $prod_rows) . "</div>";
     }
     $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", []);
-    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts]));
+    $tagline = setting_get($c, "tagline", "Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.");
+    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline]));
 });
 
 route("GET", "/blog", function() {
@@ -702,6 +733,28 @@ route("POST", "/admin/users/new", function() {
         }
     }
     return response::redirect("/admin/users");
+});
+
+// ── admin: settings (role 'admin' only) ──────────────────────────────────────
+route("GET", "/admin/settings", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    return response::html(view("admin_settings.html", [
+        "s_title"    => setting_get($c, "site_title", "LookPress"),
+        "s_tagline"  => setting_get($c, "tagline", ""),
+        "s_currency" => setting_get($c, "currency", "&#8378;")
+    ]));
+});
+route("POST", "/admin/settings", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    setting_set($c, "site_title", string::trim(request::post("site_title")));
+    setting_set($c, "tagline", string::trim(request::post("tagline")));
+    setting_set($c, "currency", string::trim(request::post("currency")));
+    settings_bust();
+    return response::redirect("/admin/settings");
 });
 
 // ── DYNAMIC per-type routing via a request-time dispatcher ────────────────────
