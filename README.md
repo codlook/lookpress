@@ -34,18 +34,59 @@ fields. (Not "non-developers"; that label is earned only once theme customizatio
 - **Honest claims** — every number is measured; every security claim is either structurally enforced
   or labeled a target, never asserted without proof.
 
+## Quick start
+
+The whole platform runs in Docker on the published LOOK runtime — no build toolchain needed:
+
+```bash
+git clone https://github.com/codlook/lookpress && cd lookpress
+docker compose up            # http://localhost:8080
+```
+
+That gives you a populated demo: a shop with products (tr + en), a blog, pages, and a working admin
+at **/admin** (user `admin`, password from `ADMIN_PASSWORD` — the compose dev default is
+`lookpress-dev`; **set your own** in a `.env` for anything real). `docker compose down` stops it and
+keeps the data; `down -v` resets to the clean demo.
+
+SQLite by default (no DB server for dev). Point `DB_DSN` at `mysql://…` / `postgres://…` for a real
+database.
+
+## What's built
+
+On the versioned content core + type engine (define fields → CRUD + `/api/{type}` + admin, no
+per-type code), the following work end to end:
+
+- **Content** — pages, a paginated blog, generic type listings, render-on-save Markdown, a media
+  library, **revision history + one-click rollback** (a pointer move over immutable revisions).
+- **Commerce** — a product type, a catalog grid, product pages, a session cart, checkout with
+  shipping details, persisted orders, and admin order + status management. (Payment is a Phase-6
+  `paytr`/`iyzico` package — checkout is TEST-MODE.)
+- **Multilingual** — URL-based (`/en/…`), the same slug per language over the versioned core; author
+  each language from the admin. A TR/EN switcher in the header.
+- **SEO** — per-page meta + Open Graph + Product JSON-LD, plus `sitemap.xml`, `robots.txt`, an RSS
+  `/feed`, and site search.
+- **Forms** — a contact form with a honeypot; submissions reviewed in the admin.
+- **Users & roles (RBAC)** — real users (PBKDF2), an `admin` / `editor` split, admin-only sections.
+- **Settings & theming** — configurable site title/tagline/currency; **themes** (a template set,
+  per-template override + fallback to `default`) and **skins** (colour palettes) chosen in the admin.
+  The **admin UI is its own thing**, independent of the site theme — a theme ships only public views.
+
+## Admin, theming, testing
+
+- **Admin** lives under `/admin` with its own shell (`admin/`), separate from site themes.
+- **Themes** are directories under `themes/`. `view()` renders `themes/{active}/{tpl}` and falls back
+  to `themes/default/{tpl}` per template, so a theme overrides only what it wants (see `themes/aurora`
+  for a different homepage). Full per-theme chrome is limited by the template engine's literal
+  `{#extends}`; per-template override is what's clean today.
+- **Tests** — `bash test/smoke.sh` runs 33 end-to-end checks (public, multilingual, SEO, commerce,
+  admin/RBAC) against a running instance; CI (`.github/workflows/smoke.yml`) runs it on every push.
+
 ## Status
 
-**In design → early build.** The architecture and the phased plan live in
-**[PROJECT.md](PROJECT.md)** — read that first.
-
-The code in this repo begins as the reference CMS promoted from
-[look-examples/cms](https://github.com/codlook/look-examples/tree/main/cms) (pages, a blog with
-pagination, a media library, render-on-save). Phase 1 evolves it into the versioned content core +
-type engine described in PROJECT.md.
-
-**Live reference:** **[cms.codlook.com](https://cms.codlook.com)** — this CMS runs its own blog, and
-each phase ships there (dogfood = production).
+**Working platform, built slice by slice** — each feature above is verified end to end and locked by
+the smoke suite. The design and phased plan live in **[PROJECT.md](PROJECT.md)**. Remaining from the
+roadmap: live payment integration (needs your provider credentials) and automatic image → WebP
+(needs an external tool, since LOOK deliberately has no process-exec).
 
 ## Not building (v1)
 
