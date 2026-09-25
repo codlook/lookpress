@@ -5,8 +5,8 @@
   <p>{$tagline}</p>
 </section>
 {!$products_section}
-<div class="section-head"><h2>Latest posts</h2><a class="more" href="/blog">All posts &rarr;</a></div>
+<div class="section-head"><h2>Latest posts</h2><a class="more" href="{$lang_prefix}/blog">All posts &rarr;</a></div>
 <ul class="pages">
-{#each $posts as $p}<li><a href="/blog/{$p.slug}">{$p.title}</a></li>{/each}
+{#each $posts as $p}<li><a href="{$lang_prefix}/blog/{$p.slug}">{$p.title}</a></li>{/each}
 </ul>
 {/block}

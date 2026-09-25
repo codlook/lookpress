@@ -2,11 +2,11 @@
 {#block "content"}
 <h2>Blog</h2>
 <ul class="pages">
-{#each $posts as $p}<li><a href="/blog/{$p.slug}">{$p.title}</a></li>{/each}
+{#each $posts as $p}<li><a href="{$lang_prefix}/blog/{$p.slug}">{$p.title}</a></li>{/each}
 </ul>
 <nav class="pager">
-{#if $has_prev}<a href="/blog?page={$prev}">&larr; Newer</a>{/if}
+{#if $has_prev}<a href="{$lang_prefix}/blog?page={$prev}">&larr; Newer</a>{/if}
 <span class="muted">Page {$page}</span>
-{#if $has_next}<a href="/blog?page={$next}">Older &rarr;</a>{/if}
+{#if $has_next}<a href="{$lang_prefix}/blog?page={$next}">Older &rarr;</a>{/if}
 </nav>
 {/block}

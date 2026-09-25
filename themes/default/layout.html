@@ -77,10 +77,12 @@
  .checkout-fields{display:flex;flex-direction:column;gap:10px;max-width:460px;margin-top:14px}
  .ship-box{border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:12px 0;font-size:14px;line-height:1.7}
  .ship-addr{color:var(--muted);white-space:pre-wrap}
+ .langsw{font-size:12px;color:var(--muted)}
+ .langsw a{color:var(--accent)}
 </style></head>
 <body data-theme="{$theme}">
 <header><h1><a href="/">{$site_title}</a></h1>
 <form method="get" action="/search" class="nav-search"><input type="search" name="q" placeholder="Ara…"></form>
-<nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/contact">İletişim</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a></nav></header>
+<nav><a href="/product">Mağaza</a> &middot; <a href="/blog">Blog</a> &middot; <a href="/contact">İletişim</a> &middot; <a href="/cart">Sepet</a> &middot; <a href="/admin">Admin</a> &middot; <span class="langsw"><a href="/">TR</a>/<a href="/en">EN</a></span></nav></header>
 <main>{#block "content"}{/block}</main>
 </body></html>

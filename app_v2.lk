@@ -469,9 +469,9 @@ function render_fields_html($c, $type, $fields_json) {
 }
 
 // ── public: published_rev ONLY. Serve content of a type by slug. ─────────────
-function render_published($type, $slug) {
+function render_published($type, $slug, $lang) {
     $c = conn();
-    $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0", [$type, $slug]);
+    $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
     // Commerce signal: any type that declares a non-empty `price` gets an
@@ -523,11 +523,12 @@ function cards_html($base, $rows) {
     }
     return $cards;
 }
-function render_listing($c, $type) {
+function lang_prefix($lang) { if ($lang == "tr") { return ""; } return "/" . $lang; }
+function render_listing($c, $type, $lang) {
     $t = load_type($c, $type);
     if ($t == null) { return response::status(404, view("notfound.html", [])); }
-    $base = string::replace($t["url_pattern"], "/{slug}", "");
-    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type]);
+    $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
     $cards = cards_html($base, $rows);
     if ($cards == "") { $cards = "<p class=\"muted\">No published items yet.</p>"; }
     return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "cards" => $cards]));
@@ -538,34 +539,38 @@ function render_listing($c, $type) {
 // the public listing reads published_rev ONLY (read-surface invariant). Post DETAIL is
 // served by the dispatcher (url_pattern '/blog/{slug}'), so only the index lives here.
 
-// Home — published pages, alphabetical (v1 "/" parity, on the versioned core).
-route("GET", "/", function() {
+// Home + blog — lang-aware (tr = no prefix, en = /en). The versioned core carries
+// a `lang` column, so a page/post/product exists per language under the same slug.
+function home_render($lang) {
     $c = conn();
-    // Showcase landing: featured products (if any) + latest posts. Curated, so the
-    // section is built here; the template just prints the blocks.
-    $prod_rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", []);
+    $pfx = lang_prefix($lang);
+    $prod_rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", [$lang]);
     $products_section = "";
     if (count($prod_rows) > 0) {
-        $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html("/product", $prod_rows) . "</div>";
+        $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $prod_rows) . "</div>";
     }
-    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", []);
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", [$lang]);
     $tagline = setting_get($c, "tagline", "Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.");
-    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline]));
-});
-
-route("GET", "/blog", function() {
+    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline, "lang_prefix" => $pfx]));
+}
+function blog_render($lang) {
     $c = conn();
+    $pfx = lang_prefix($lang);
     $per = 5;
     $page = type::to_int(request::get("page") ?? "1");
     if ($page < 1) { $page = 1; }
     $offset = ($page - 1) * $per;
-    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'post' AND published_rev > 0", [])[0]["n"]);
-    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", [$per, $offset]);
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'post' AND lang = ? AND published_rev > 0", [$lang])[0]["n"]);
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", [$lang, $per, $offset]);
     return response::html(view("blog.html", [
         "posts" => $posts, "page" => $page, "prev" => $page - 1, "next" => $page + 1,
-        "has_prev" => $page > 1, "has_next" => ($offset + $per) < $total
+        "has_prev" => $page > 1, "has_next" => ($offset + $per) < $total, "lang_prefix" => $pfx
     ]));
-});
+}
+route("GET", "/",        function() { return home_render("tr"); });
+route("GET", "/en",      function() { return home_render("en"); });
+route("GET", "/blog",    function() { return blog_render("tr"); });
+route("GET", "/en/blog", function() { return blog_render("en"); });
 
 // Media library — uploads are NOT versioned content; a separate media table names files
 // by sha256 (dedupe) and keeps them outside the web root. Admin list/upload/delete;
@@ -937,23 +942,37 @@ route("POST", "/admin/settings", function() {
 //   1-segment  /{a}      → the type whose url_pattern is "/{slug}" (e.g. page), slug=a
 //   2-segment  /{a}/{b}  → the type whose url_pattern is "/{a}/{slug}"  (e.g. post,
 //                          product: /blog/{slug}, /products/{slug}), slug=b
-route("GET", "/{a}", function() {
-    $c = conn();
-    $a = request::param("a");
-    // 1) a published page at /{slug}?
+// One path segment in a language: a published page at /{slug}, else a type listing.
+function resolve_1seg($c, $seg, $lang) {
     $page = type_for_pattern($c, "/{slug}");           // cached (60s, busted on type write)
     if ($page != "") {
-        $hit = db::query($c, "SELECT 1 AS x FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0", [$page, $a]);
-        if (count($hit) > 0) { return render_published($page, $a); }
+        $hit = db::query($c, "SELECT 1 AS x FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$page, $seg, $lang]);
+        if (count($hit) > 0) { return render_published($page, $seg, $lang); }
     }
-    // 2) /{a} as a type LISTING (a type whose url_pattern is "/{a}/{slug}")
-    $lt = type_for_base($c, "/" . $a);
-    if ($lt != "") { return render_listing($c, $lt); }
+    $lt = type_for_base($c, "/" . $seg);
+    if ($lt != "") { return render_listing($c, $lt, $lang); }
     return response::status(404, view("notfound.html", []));
+}
+// Two segments in a language: the type whose url_pattern is "/{a}/{slug}", slug=b.
+function resolve_2seg($c, $a, $b, $lang) {
+    $slug = type_for_pattern($c, "/" . $a . "/{slug}");
+    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
+    return render_published($slug, $b, $lang);
+}
+// The /en prefix shifts every path one segment right; the same resolvers run with
+// lang="en". Default (tr) has no prefix. (Bare /en and /en/blog are routed above.)
+route("GET", "/{a}", function() {
+    $c = conn();
+    return resolve_1seg($c, request::param("a"), "tr");
 });
 route("GET", "/{a}/{b}", function() {
     $c = conn();
-    $slug = type_for_pattern($c, "/" . request::param("a") . "/{slug}");
-    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
-    return render_published($slug, request::param("b"));
+    $a = request::param("a");
+    if ($a == "en") { return resolve_1seg($c, request::param("b"), "en"); }
+    return resolve_2seg($c, $a, request::param("b"), "tr");
+});
+route("GET", "/{a}/{b}/{c}", function() {
+    $c = conn();
+    if (request::param("a") == "en") { return resolve_2seg($c, request::param("b"), request::param("c"), "en"); }
+    return response::status(404, view("notfound.html", []));
 });
