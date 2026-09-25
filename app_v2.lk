@@ -196,17 +196,17 @@ function validate_post($c, $fields) {
 }
 
 // ── versioned-core write: create/update content as a new revision ────────────
-function save_content($c, $type, $id, $slug, $values, $status) {
+function save_content($c, $type, $id, $slug, $values, $status, $lang) {
     $title = $values["title"];
     $body_md = $values["body"];
     $body_html = markdown_to_html($body_md);
     $fields_json = json::encode($values);
     $ts = date::timestamp();
     if ($id == 0) {
-        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, 'tr', ?, ?, ?)", [$type, $slug, $status, $ts, $ts]);
+        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [$type, $slug, $lang, $status, $ts, $ts]);
         $id = db::last_id($c);
     } else {
-        db::exec($c, "UPDATE content SET slug = ?, status = ?, updated_at = ? WHERE id = ?", [$slug, $status, $ts, $id]);
+        db::exec($c, "UPDATE content SET slug = ?, lang = ?, status = ?, updated_at = ? WHERE id = ?", [$slug, $lang, $status, $ts, $id]);
     }
     // rev_no = max+1
     $mx = db::query($c, "SELECT COALESCE(MAX(rev_no),0) AS m FROM revisions WHERE content_id = ?", [$id]);
@@ -312,13 +312,14 @@ route("GET", "/admin/type/{type}/new", function() {
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
     $form = fields_form_html($c, $t["fields"], null);
-    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "errors" => []]));
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "lang" => "tr", "errors" => []]));
 });
 
 // A slug is unique per (lang, type); reject a collision gracefully instead of
 // letting the UNIQUE constraint 500 the edit form.
-function slug_taken($c, $type, $slug, $exclude_id) {
-    return count(db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = 'tr' AND id != ?", [$type, $slug, $exclude_id])) > 0;
+function norm_lang($l) { if ($l == "en") { return "en"; } return "tr"; }
+function slug_taken($c, $type, $slug, $exclude_id, $lang) {
+    return count(db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = ? AND id != ?", [$type, $slug, $lang, $exclude_id])) > 0;
 }
 route("POST", "/admin/type/{type}/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -328,13 +329,14 @@ route("POST", "/admin/type/{type}/new", function() {
     $v = validate_post($c, $t["fields"]);
     $slug = string::trim(request::post("slug"));
     $errs = $v["errors"];
+    $lang = norm_lang(request::post("lang"));
     if ($slug == "") { $errs = array::push($errs, "slug is required"); }
-    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, 0)) { $errs = array::push($errs, "bu slug zaten kullanımda"); } }
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, 0, $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
     }
-    save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"));
+    save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"), $lang);
     return response::redirect("/admin/type/" . $t["slug"]);
 });
 
@@ -343,11 +345,11 @@ route("GET", "/admin/type/{type}/edit/{id}", function() {
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
-    $rows = db::query($c, "SELECT c.slug, c.status, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    $rows = db::query($c, "SELECT c.slug, c.status, c.lang, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
     if (count($rows) == 0) { return response::status(404, "No such item"); }
     $vals = json::decode($rows[0]["fields_json"]);
     $form = fields_form_html($c, $t["fields"], $vals);
-    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "errors" => []]));
+    return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "lang" => $rows[0]["lang"], "errors" => []]));
 });
 
 route("POST", "/admin/type/{type}/edit/{id}", function() {
@@ -358,12 +360,13 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
     $v = validate_post($c, $t["fields"]);
     $slug = string::trim(request::post("slug"));
     $errs = $v["errors"];
-    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, type::to_int(request::param("id")))) { $errs = array::push($errs, "bu slug zaten kullanımda"); } }
+    $lang = norm_lang(request::post("lang"));
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, type::to_int(request::param("id")), $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "errors" => $errs]));
+        return response::html(view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
     }
-    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"));
+    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"), $lang);
     return response::redirect("/admin/type/" . $t["slug"]);
 });
 
