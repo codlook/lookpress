@@ -51,6 +51,37 @@ keeps the data; `down -v` resets to the clean demo.
 SQLite by default (no DB server for dev). Point `DB_DSN` at `mysql://…` / `postgres://…` for a real
 database.
 
+## Project layout
+
+Application code, routes and views are separated — no monolith, and every view lives under one roof:
+
+```
+app.lk                 Entry point — composition only: loads modules in order.
+src/                   Application code (one responsibility per module)
+  core.lk                framework: DB, cached settings, view rendering, SEO, auth gates
+  types.lk               the type engine: field inputs, validation, versioned-core write
+  render.lk              public presentation: pages, listings, home/blog, URL resolvers
+  cart.lk                commerce helpers: cart + coupon maths
+routes/                HTTP routes (thin controllers)
+  public.lk              home, blog, media, search, sitemap/robots/feed, forms
+  commerce.lk            cart + checkout
+  admin.lk               /admin/* + JSON API + preview (auth-gated)
+  dispatch.lk            dynamic per-type catch-alls — loaded LAST (first-match wins)
+views/                 All presentation, one place
+  admin/                 admin UI shell + pages (its own theme, not a site theme)
+  themes/                site themes; the active one is chosen in admin settings
+    default/               the built-in theme (every template + the layout)
+    aurora/                an alternate theme (overrides only what it changes)
+lib/                   reusable libraries (markdown, migrations)
+setup.lk · setup_v2.lk   idempotent schema + seed (run by the container entrypoint)
+test/smoke.sh          end-to-end checks, run in CI on every push
+```
+
+Routing is **first-match by registration order**, and `use "file"` runs a module's `route()` calls
+inline where it's loaded — so the only ordering rule is that `dispatch.lk` loads last. A **theme** is
+a directory of templates; a **skin** is a colour palette. The admin UI is deliberately separate from
+site themes, so a theme ships only public views.
+
 ## What's built
 
 On the versioned content core + type engine (define fields → CRUD + `/api/{type}` + admin, no
@@ -73,11 +104,11 @@ per-type code), the following work end to end:
 
 ## Admin, theming, testing
 
-- **Admin** lives under `/admin` with its own shell (`admin/`), separate from site themes.
-- **Themes** are directories under `themes/`. `view()` renders `themes/{active}/{tpl}` and falls back
-  to `themes/default/{tpl}` per template, so a theme overrides only what it wants (see `themes/aurora`
-  for a different homepage). Full per-theme chrome is limited by the template engine's literal
-  `{#extends}`; per-template override is what's clean today.
+- **Admin** lives under `/admin` with its own shell (`views/admin/`), separate from site themes.
+- **Themes** are directories under `views/themes/`. `view()` renders `views/themes/{active}/{tpl}` and
+  falls back to `views/themes/default/{tpl}` per template, so a theme overrides only what it wants (see
+  `views/themes/aurora` for a different homepage). Full per-theme chrome is limited by the template
+  engine's literal `{#extends}`; per-template override is what's clean today.
 - **Tests** — `bash test/smoke.sh` runs 33 end-to-end checks (public, multilingual, SEO, commerce,
   admin/RBAC) against a running instance; CI (`.github/workflows/smoke.yml`) runs it on every push.
 
