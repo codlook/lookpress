@@ -117,9 +117,11 @@ per-type code), the following work end to end:
 ## Status
 
 **Working platform, built slice by slice** — each feature above is verified end to end and locked by
-the smoke suite. The design and phased plan live in **[PROJECT.md](PROJECT.md)**. Remaining from the
-roadmap: live payment integration (needs your provider credentials) and automatic image → WebP
-(needs an external tool, since LOOK deliberately has no process-exec).
+the smoke suite. Live reference deployment: **https://test.codlook.com** (Plesk). The design lives in
+**[PROJECT.md](PROJECT.md)**, the forward plan in **[ROADMAP.md](ROADMAP.md)** (positioning +
+phased engineering), and Plesk deployment in **[docs/plesk-deploy.md](docs/plesk-deploy.md)**.
+Remaining before a real shop can take money: payment integration, transactional email, customer
+accounts (see the roadmap's Phase A).
 
 ## Not building (v1)
 
