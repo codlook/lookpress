@@ -1,0 +1,21 @@
+{#extends "themes/default/layout"}
+{#block "content"}
+<style>
+ .aurora-hero{margin:8px 0 30px;padding:44px 32px;border-radius:18px;color:#fff;
+   background:linear-gradient(120deg,#5b21b6,#2563eb 55%,#0ea5e9);text-align:center}
+ .aurora-hero h1{margin:0;font-size:clamp(30px,6vw,48px);letter-spacing:-.02em}
+ .aurora-hero p{margin:12px auto 0;max-width:46ch;font-size:17px;opacity:.92}
+ .aurora-section h2{font-size:26px;letter-spacing:-.01em}
+</style>
+<section class="aurora-hero">
+  <h1>{$site_title}</h1>
+  <p>{$tagline}</p>
+</section>
+<div class="aurora-section">
+{!$products_section}
+<div class="section-head"><h2>Latest posts</h2><a class="more" href="{$lang_prefix}/blog">All posts &rarr;</a></div>
+<ul class="pages">
+{#each $posts as $p}<li><a href="{$lang_prefix}/blog/{$p.slug}">{$p.title}</a></li>{/each}
+</ul>
+</div>
+{/block}

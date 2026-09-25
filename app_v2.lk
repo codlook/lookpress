@@ -50,15 +50,23 @@ function setting_set($c, $key, $val) {
 }
 function settings_bust() { cache::delete("core:settings"); }
 function site_title() { return setting_get(conn(), "site_title", "LookPress"); }
+// A THEME is a template directory (themes/{theme}/) that may override any public
+// template; missing ones fall back to themes/default. A SKIN is a colour palette
+// (data-theme) applied by the default layout. They are independent settings.
 function active_theme() { return setting_get(conn(), "theme", "default"); }
-
-// Inject the site title + active theme (skin) into every PUBLIC view, and default
-// head_extra (SEO meta/JSON-LD) so the layout <head> always resolves it.
+function active_skin() { return setting_get(conn(), "skin", "default"); }
+function theme_tpl($theme, $tpl) {
+    $p = "themes/" . $theme . "/" . $tpl;
+    if (file::exists($p)) { return $p; }
+    return "themes/default/" . $tpl;
+}
+// Inject site title + skin into every PUBLIC view; default head_extra (SEO); render
+// from the active theme with a per-template fallback to default.
 function view($tpl, $data) {
     $data["site_title"] = site_title();
-    $data["theme"] = active_theme();
+    $data["skin"] = active_skin();
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
-    return template::render("themes/default/" . $tpl, $data);
+    return template::render(theme_tpl(active_theme(), $tpl), $data);
 }
 // Admin has its OWN UI, independent of the active site theme (admin/layout) — a
 // theme ships only public views, so the theme ecosystem stays light.
@@ -908,19 +916,24 @@ route("GET", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!is_super()) { return response::status(403, "admin only"); }
     $c = conn();
-    $cur = setting_get($c, "theme", "default");
-    $themes = ["default", "ocean", "sunset", "dark"];
+    $cur_theme = setting_get($c, "theme", "default");
     $topts = "";
-    foreach ($themes as $th) {
-        $sa = "";
-        if ($th == $cur) { $sa = " selected"; }
+    foreach (["default", "aurora"] as $th) {
+        $sa = ""; if ($th == $cur_theme) { $sa = " selected"; }
         $topts = $topts . "<option value=\"" . $th . "\"" . $sa . ">" . $th . "</option>";
+    }
+    $cur_skin = setting_get($c, "skin", "default");
+    $kopts = "";
+    foreach (["default", "ocean", "sunset", "dark"] as $sk) {
+        $sa = ""; if ($sk == $cur_skin) { $sa = " selected"; }
+        $kopts = $kopts . "<option value=\"" . $sk . "\"" . $sa . ">" . $sk . "</option>";
     }
     return response::html(admin_view("admin_settings.html", [
         "s_title"    => setting_get($c, "site_title", "LookPress"),
         "s_tagline"  => setting_get($c, "tagline", ""),
         "s_currency" => setting_get($c, "currency", "&#8378;"),
-        "theme_options" => $topts
+        "theme_options" => $topts,
+        "skin_options" => $kopts
     ]));
 });
 route("POST", "/admin/settings", function() {
@@ -931,8 +944,9 @@ route("POST", "/admin/settings", function() {
     setting_set($c, "tagline", string::trim(request::post("tagline")));
     setting_set($c, "currency", string::trim(request::post("currency")));
     $th = request::post("theme");
-    $allowed_themes = ["default", "ocean", "sunset", "dark"];
-    if (array::contains($allowed_themes, $th)) { setting_set($c, "theme", $th); }
+    if (array::contains(["default", "aurora"], $th)) { setting_set($c, "theme", $th); }
+    $sk = request::post("skin");
+    if (array::contains(["default", "ocean", "sunset", "dark"], $sk)) { setting_set($c, "skin", $sk); }
     settings_bust();
     return response::redirect("/admin/settings");
 });
