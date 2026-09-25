@@ -1,0 +1,172 @@
+// src/render.lk — public presentation. Turns published revisions into pages,
+// listings, the home showcase and the blog index, plus the language-aware URL
+// resolvers the dispatcher calls. Reads published_rev ONLY (read-surface invariant).
+use db;
+use json;
+use html;
+use string;
+use type;
+use array;
+
+// ── generic custom-field renderer ────────────────────────────────────────────
+// EVERY type renders its own fields with no type-specific code: read the type's
+// field definitions + the revision's stored values, emit a block. `image`/`price`
+// get nicer markup; everything else is a labelled row.
+function render_fields_html($c, $type, $fields_json) {
+    $trow = db::query($c, "SELECT fields_json FROM content_types WHERE slug = ?", [$type]);
+    if (count($trow) == 0) { return ""; }
+    $defs = json::decode($trow[0]["fields_json"]);
+    $vals = json::decode($fields_json);
+    if ($vals == null) { return ""; }
+    $out = "";
+    foreach ($defs as $f) {
+        $name = $f["name"];
+        if ($name == "title" || $name == "body") { continue; }
+        $v = "";
+        try { $v = $vals[$name]; } catch ($e) { $v = ""; }
+        if ($v == null) { $v = ""; }
+        if ($v == "") { continue; }
+        if ($name == "image") {
+            $out = $out . "<img class=\"cf-image\" src=\"" . html::escape($v) . "\" alt=\"\" onerror=\"this.style.display='none'\">";
+        } else {
+            if ($name == "price") {
+                $out = $out . "<div class=\"cf-price\">" . html::escape($v) . " &#8378;</div>";
+            } else {
+                $out = $out . "<div class=\"cf-row\"><span class=\"cf-label\">" . html::escape($name) . "</span> " . html::escape($v) . "</div>";
+            }
+        }
+    }
+    if ($out == "") { return ""; }
+    return "<div class=\"cf\">" . $out . "</div>";
+}
+
+// tr = no prefix, en = /en. The versioned core carries a `lang` column so a
+// page/post/product exists per language under the same slug.
+function lang_prefix($lang) { if ($lang == "tr") { return ""; } return "/" . $lang; }
+
+// hreflang alternates — links a content item's language variants for search engines
+// (only when the same slug is published in more than one language).
+function hreflang_links($c, $type, $slug) {
+    $rows = db::query($c, "SELECT lang FROM content WHERE type = ? AND slug = ? AND published_rev > 0", [$type, $slug]);
+    if (count($rows) < 2) { return ""; }
+    $tp = db::query($c, "SELECT url_pattern FROM content_types WHERE slug = ?", [$type]);
+    if (count($tp) == 0) { return ""; }
+    $path = string::replace($tp[0]["url_pattern"], "{slug}", $slug);
+    $base = base_url();
+    $out = "";
+    foreach ($rows as $r) {
+        $href = $base . lang_prefix($r["lang"]) . $path;
+        $out = $out . "<link rel=\"alternate\" hreflang=\"" . html::escape($r["lang"]) . "\" href=\"" . html::escape($href) . "\">";
+    }
+    return $out;
+}
+
+// ── public: published_rev ONLY. Serve content of a type by slug. ─────────────
+function render_published($type, $slug, $lang) {
+    $c = conn();
+    $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
+    // Commerce signal: any type that declares a non-empty `price` gets an
+    // add-to-cart button (the cart is a dynamic island, session-backed).
+    $vals = json::decode($rows[0]["fields_json"]);
+    $price = "";
+    if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
+    if ($price != null) {
+        if ($price != "") {
+            $extra = $extra . "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($slug) . "\"><button>Sepete ekle</button></form>";
+        }
+    }
+    // SEO: meta description from the body + Product JSON-LD when priced.
+    $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155);
+    $jsonld = "";
+    if ($price != null) {
+        if ($price != "") {
+            $ld = ["@context" => "https://schema.org", "@type" => "Product",
+                   "name" => $rows[0]["title"], "description" => $desc,
+                   "offers" => ["@type" => "Offer", "price" => $price, "priceCurrency" => "TRY", "availability" => "https://schema.org/InStock"]];
+            $jsonld = json::encode($ld);
+        }
+    }
+    $head = seo_head($rows[0]["title"], $desc, "website", $jsonld) . hreflang_links($c, $type, $slug);
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra, "head_extra" => $head]));
+}
+
+// ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────
+// shared card builder — used by the catalog listing AND the home showcase.
+function cards_html($base, $rows) {
+    $cards = "";
+    foreach ($rows as $it) {
+        $vals = json::decode($it["fields_json"]);
+        $img = ""; $price = "";
+        if ($vals != null) {
+            try { $img = $vals["image"]; } catch ($e) { $img = ""; }
+            try { $price = $vals["price"]; } catch ($e) { $price = ""; }
+        }
+        if ($img == null) { $img = ""; }
+        if ($price == null) { $price = ""; }
+        $imgh = "";
+        if ($img != "") { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($img) . "\" alt=\"\" onerror=\"this.style.display='none'\"></span>"; }
+        $priceh = "";
+        if ($price != "") { $priceh = "<div class=\"card-price\">" . html::escape($price) . " &#8378;</div>"; }
+        $url = $base . "/" . $it["slug"];
+        $cards = $cards . "<a class=\"card\" href=\"" . html::escape($url) . "\">" . $imgh . "<div class=\"card-body\"><div class=\"card-title\">" . html::escape($it["title"]) . "</div>" . $priceh . "</div></a>";
+    }
+    return $cards;
+}
+function render_listing($c, $type, $lang) {
+    $t = load_type($c, $type);
+    if ($t == null) { return response::status(404, view("notfound.html", [])); }
+    $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
+    $cards = cards_html($base, $rows);
+    if ($cards == "") { $cards = "<p class=\"muted\">No published items yet.</p>"; }
+    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "cards" => $cards]));
+}
+
+// ── home + blog index (lang-aware) ───────────────────────────────────────────
+function home_render($lang) {
+    $c = conn();
+    $pfx = lang_prefix($lang);
+    $prod_rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", [$lang]);
+    $products_section = "";
+    if (count($prod_rows) > 0) {
+        $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $prod_rows) . "</div>";
+    }
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", [$lang]);
+    $tagline = setting_get($c, "tagline", "Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.");
+    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline, "lang_prefix" => $pfx]));
+}
+function blog_render($lang) {
+    $c = conn();
+    $pfx = lang_prefix($lang);
+    $per = 5;
+    $page = type::to_int(request::get("page") ?? "1");
+    if ($page < 1) { $page = 1; }
+    $offset = ($page - 1) * $per;
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'post' AND lang = ? AND published_rev > 0", [$lang])[0]["n"]);
+    $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", [$lang, $per, $offset]);
+    return response::html(view("blog.html", [
+        "posts" => $posts, "page" => $page, "prev" => $page - 1, "next" => $page + 1,
+        "has_prev" => $page > 1, "has_next" => ($offset + $per) < $total, "lang_prefix" => $pfx
+    ]));
+}
+
+// ── language-aware URL resolvers (the dispatcher calls these) ─────────────────
+//   1-segment  /{a}      → the type whose url_pattern is "/{slug}" (e.g. page), slug=a
+//   2-segment  /{a}/{b}  → the type whose url_pattern is "/{a}/{slug}" (e.g. post/product)
+function resolve_1seg($c, $seg, $lang) {
+    $page = type_for_pattern($c, "/{slug}");           // cached (60s, busted on type write)
+    if ($page != "") {
+        $hit = db::query($c, "SELECT 1 AS x FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$page, $seg, $lang]);
+        if (count($hit) > 0) { return render_published($page, $seg, $lang); }
+    }
+    $lt = type_for_base($c, "/" . $seg);
+    if ($lt != "") { return render_listing($c, $lt, $lang); }
+    return response::status(404, view("notfound.html", []));
+}
+function resolve_2seg($c, $a, $b, $lang) {
+    $slug = type_for_pattern($c, "/" . $a . "/{slug}");
+    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
+    return render_published($slug, $b, $lang);
+}

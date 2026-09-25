@@ -1,0 +1,453 @@
+// routes/admin.lk — the admin surface + JSON API + preview. Every route is gated
+// by is_admin() (login) and the super-only ones by is_super() (RBAC). All admin
+// pages read current_rev (draft-aware); the public API reads published_rev only.
+use db;
+use session;
+use string;
+use json;
+use html;
+use type;
+use array;
+use date;
+use auth;
+use file;
+
+// ── admin auth ───────────────────────────────────────────────────────────────
+route("GET", "/admin/login", function() { return response::html(admin_view("login.html", ["error" => ""])); });
+route("POST", "/admin/login", function() {
+    $c = conn();
+    $u = request::post("username");
+    $p = request::post("password");
+    if ($u != null) {
+        if ($p != null) {
+            if ($u != "" && $p != "") {
+                $rows = db::query($c, "SELECT id, password_hash, role FROM users WHERE username = ?", [$u]);
+                if (count($rows) == 1) {
+                    if (auth::verify($p, $rows[0]["password_hash"])) {
+                        session::start(); session::regenerate();
+                        session::set("uid", "" . $rows[0]["id"]);
+                        session::set("uname", $u);
+                        session::set("role", $rows[0]["role"]);
+                        return response::redirect("/admin");
+                    }
+                }
+            }
+        }
+    }
+    return response::html(admin_view("login.html", ["error" => "Kullanıcı adı ya da şifre hatalı."]));
+});
+route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
+
+// Admin dashboard: stats + recent orders + the type list (the engine's entry point).
+route("GET", "/admin", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    session::start();
+    $c = conn();
+    $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
+    $n_content  = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", [])[0]["n"]);
+    $n_products = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'product' AND published_rev > 0", [])[0]["n"]);
+    $n_orders   = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM orders", [])[0]["n"]);
+    $revenue    = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders", [])[0]["r"];
+    $n_subs     = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM form_submissions", [])[0]["n"]);
+    $recent = db::query($c, "SELECT id, cust_name, total, status FROM orders ORDER BY id DESC LIMIT 5", []);
+    $recent_html = "";
+    foreach ($recent as $o) {
+        $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+        $recent_html = $recent_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($cn) . "</td><td>" . html::escape("" . $o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($recent_html == "") { $recent_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
+    $types_html = "";
+    foreach ($types as $t) {
+        $types_html = $types_html . "<li><a href=\"/admin/type/" . $t["slug"] . "\">" . html::escape($t["label"]) . "</a> <span class=\"muted\">(" . html::escape($t["slug"]) . ")</span></li>";
+    }
+    return response::html(admin_view("admin_dashboard.html", [
+        "uname" => $uname, "is_super" => is_super(),
+        "n_content" => $n_content, "n_products" => $n_products, "n_orders" => $n_orders,
+        "revenue" => "" . $revenue, "n_subs" => $n_subs,
+        "recent" => $recent_html, "types_html" => $types_html
+    ]));
+});
+
+// ── type-admin: create a content type from the admin ─────────────────────────
+route("GET", "/admin/types/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    return response::html(admin_view("admin_type_def.html", [
+        "slug" => "", "label" => "", "url_pattern" => "/{slug}",
+        "fields" => "[\n  {\"name\":\"title\",\"type\":\"text\",\"required\":true},\n  {\"name\":\"body\",\"type\":\"markdown\"}\n]",
+        "errors" => []
+    ]));
+});
+route("POST", "/admin/types/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $slug = string::trim(request::post("slug"));
+    $label = string::trim(request::post("label"));
+    $url = string::trim(request::post("url_pattern"));
+    $fields_raw = request::post("fields");
+    $errs = [];
+    if (!string::regex_match($slug, "^[a-z][a-z0-9_]*$")) { $errs = array::push($errs, "slug must be lowercase letters/digits/underscore, starting with a letter"); }
+    if (!string::regex_match($url, "\\{slug\\}")) { $errs = array::push($errs, "url_pattern must contain {slug}"); }
+    $fields = json::decode($fields_raw);
+    if ($fields == null) { $errs = array::push($errs, "fields must be valid JSON"); }
+    else {
+        $has_title = false; $has_body = false;
+        foreach ($fields as $f) {
+            if ($f["name"] == "title") { $has_title = true; }
+            if ($f["name"] == "body") { $has_body = true; }
+        }
+        if (!$has_title || !$has_body) { $errs = array::push($errs, "fields must include a 'title' and a 'body'"); }
+    }
+    if (count(db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug])) > 0) { $errs = array::push($errs, "a type with that slug already exists"); }
+    if (count($errs) > 0) {
+        return response::html(admin_view("admin_type_def.html", ["slug" => $slug, "label" => $label, "url_pattern" => $url, "fields" => $fields_raw, "errors" => $errs]));
+    }
+    db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES (?, ?, ?, ?)", [$slug, $label, $url, json::encode($fields)]);
+    types_cache_bust();   // new type's URL live immediately (no 60s TTL lag)
+    return response::redirect("/admin/type/" . $slug);
+});
+
+// ── GENERIC admin CRUD — ONE handler set for EVERY type (the type engine) ────
+route("GET", "/admin/type/{type}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $items = db::query($c, "SELECT c.id, c.slug, c.status, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY c.updated_at DESC", [$t["slug"]]);
+    return response::html(admin_view("admin_type_list.html", ["type" => $t, "items" => $items]));
+});
+
+route("GET", "/admin/type/{type}/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $form = fields_form_html($c, $t["fields"], null);
+    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "lang" => "tr", "errors" => []]));
+});
+route("POST", "/admin/type/{type}/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $v = validate_post($c, $t["fields"]);
+    $slug = string::trim(request::post("slug"));
+    $errs = $v["errors"];
+    $lang = norm_lang(request::post("lang"));
+    if ($slug == "") { $errs = array::push($errs, "slug is required"); }
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, 0, $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
+    if (count($errs) > 0) {
+        $form = fields_form_html($c, $t["fields"], $v["values"]);
+        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
+    }
+    save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"), $lang);
+    return response::redirect("/admin/type/" . $t["slug"]);
+});
+
+route("GET", "/admin/type/{type}/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $rows = db::query($c, "SELECT c.slug, c.status, c.lang, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, "No such item"); }
+    $vals = json::decode($rows[0]["fields_json"]);
+    $form = fields_form_html($c, $t["fields"], $vals);
+    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "lang" => $rows[0]["lang"], "errors" => []]));
+});
+route("POST", "/admin/type/{type}/edit/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $v = validate_post($c, $t["fields"]);
+    $slug = string::trim(request::post("slug"));
+    $errs = $v["errors"];
+    $lang = norm_lang(request::post("lang"));
+    if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, type::to_int(request::param("id")), $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
+    if (count($errs) > 0) {
+        $form = fields_form_html($c, $t["fields"], $v["values"]);
+        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
+    }
+    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"), $lang);
+    return response::redirect("/admin/type/" . $t["slug"]);
+});
+
+route("POST", "/admin/type/{type}/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    db::exec($c, "DELETE FROM revisions WHERE content_id = ?", [request::param("id")]);
+    db::exec($c, "DELETE FROM content WHERE id = ?", [request::param("id")]);
+    return response::redirect("/admin/type/" . request::param("type"));
+});
+
+// ── revision history + rollback (versioned core: rollback = a pointer move) ───
+route("GET", "/admin/type/{type}/history/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $type = request::param("type");
+    $cont = db::query($c, "SELECT current_rev, slug FROM content WHERE id = ?", [$id]);
+    if (count($cont) == 0) { return response::status(404, view("notfound.html", [])); }
+    $cur = type::to_int($cont[0]["current_rev"]);
+    $revs = db::query($c, "SELECT id, rev_no, title, note FROM revisions WHERE content_id = ? ORDER BY rev_no DESC", [$id]);
+    $rows = "";
+    foreach ($revs as $r) {
+        $badge = ""; $btn = "<form method=\"post\" action=\"/admin/type/" . $type . "/rollback/" . $id . "\" class=\"inline\"><input type=\"hidden\" name=\"rev\" value=\"" . $r["id"] . "\"><button>Bu sürüme dön</button></form>";
+        if (type::to_int($r["id"]) == $cur) { $badge = " <span class=\"badge\">güncel</span>"; $btn = ""; }
+        $rows = $rows . "<tr><td>#" . $r["rev_no"] . $badge . "</td><td>" . html::escape($r["title"]) . "</td><td>" . html::escape($r["note"]) . "</td><td>" . $btn . "</td></tr>";
+    }
+    return response::html(admin_view("admin_history.html", ["type" => $type, "id" => $id, "slug" => $cont[0]["slug"], "rows" => $rows, "count" => count($revs)]));
+});
+route("POST", "/admin/type/{type}/rollback/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $rev = request::post("rev");
+    $chk = db::query($c, "SELECT id FROM revisions WHERE id = ? AND content_id = ?", [$rev, $id]);
+    if (count($chk) == 1) {
+        $cont = db::query($c, "SELECT status FROM content WHERE id = ?", [$id]);
+        $pub = 0;
+        if (count($cont) == 1) { if ($cont[0]["status"] == "published") { $pub = $rev; } }
+        db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ?, updated_at = ? WHERE id = ?", [$rev, $pub, date::timestamp(), $id]);
+    }
+    return response::redirect("/admin/type/" . request::param("type") . "/history/" . $id);
+});
+
+// ── JSON API — published_rev ONLY (read-surface invariant) ────────────────────
+route("GET", "/api/{type}", function() {
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC", [$t["slug"]]);
+    $out = [];
+    foreach ($rows as $row) {
+        $item = json::decode($row["fields_json"]);
+        $item = array::set($item, "slug", $row["slug"]);
+        $out = array::push($out, $item);
+    }
+    response::text(json::encode($out));
+    response::header("Content-Type", "application/json");
+    return;
+});
+
+// ── preview — admin-session gated (draft reachable ONLY here) ─────────────────
+route("GET", "/preview/{id}", function() {
+    if (!is_admin()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => ""]));
+});
+
+// ── media library (admin: list / upload / delete) ────────────────────────────
+route("GET", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+    return response::html(admin_view("admin_media.html", ["items" => $items, "error" => ""]));
+});
+route("POST", "/admin/media", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $f = null;
+    try { $f = request::file("file", ["max_size" => 5242880, "allow_mime" => media_mimes()]); } catch ($e) { $f = null; }
+    if ($f == null) {
+        $c = conn();
+        $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
+        return response::html(admin_view("admin_media.html", ["items" => $items, "error" => "No file, or type not allowed (png / jpeg / gif / webp, max 5 MB)."]));
+    }
+    $s = file::store($f, "media");
+    $c = conn();
+    $exists = db::query($c, "SELECT id FROM media WHERE sha_name = ?", [$s["name"]]);
+    if (count($exists) == 0) {
+        db::exec($c, "INSERT INTO media (sha_name, original, mime, size, created_at) VALUES (?, ?, ?, ?, ?)", [$s["name"], $f["filename"], $s["mime"], $f["size"], date::timestamp()]);
+    }
+    return response::redirect("/admin/media");
+});
+route("POST", "/admin/media/delete/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT sha_name FROM media WHERE id = ?", [request::param("id")]);
+    if (count($rows) > 0) {
+        $path = file::upload_dir() . "/media/" . $rows[0]["sha_name"];
+        if (file::exists($path)) { file::remove($path); }
+        db::exec($c, "DELETE FROM media WHERE id = ?", [request::param("id")]);
+    }
+    return response::redirect("/admin/media");
+});
+
+// ── admin: form submissions ──────────────────────────────────────────────────
+route("GET", "/admin/forms", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $subs = db::query($c, "SELECT form_key, data_json FROM form_submissions ORDER BY id DESC LIMIT 200", []);
+    $rows = "";
+    foreach ($subs as $sub) {
+        $d = json::decode($sub["data_json"]);
+        $name = ""; $email = ""; $msg = "";
+        if ($d != null) {
+            try { $name = $d["name"]; } catch ($e) { $name = ""; }
+            try { $email = $d["email"]; } catch ($e) { $email = ""; }
+            try { $msg = $d["message"]; } catch ($e) { $msg = ""; }
+        }
+        if ($name == null) { $name = ""; }
+        if ($email == null) { $email = ""; }
+        if ($msg == null) { $msg = ""; }
+        $rows = $rows . "<tr><td>" . html::escape($sub["form_key"]) . "</td><td>" . html::escape($name) . "</td><td>" . html::escape($email) . "</td><td>" . html::escape($msg) . "</td></tr>";
+    }
+    if ($rows == "") { $rows = "<tr><td colspan=\"4\" class=\"muted\">Henüz gönderim yok.</td></tr>"; }
+    return response::html(admin_view("admin_forms.html", ["rows" => $rows, "count" => count($subs)]));
+});
+
+// ── admin: coupons (super only) ──────────────────────────────────────────────
+route("GET", "/admin/coupons", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT code, kind, value, active FROM coupons ORDER BY id DESC", []);
+    $html = "";
+    foreach ($rows as $r) {
+        $act = "hayır"; if (type::to_int($r["active"]) == 1) { $act = "evet"; }
+        $html = $html . "<tr><td>" . html::escape($r["code"]) . "</td><td>" . html::escape($r["kind"]) . "</td><td>" . html::escape($r["value"]) . "</td><td>" . $act . "</td></tr>";
+    }
+    if ($html == "") { $html = "<tr><td colspan=\"4\" class=\"muted\">Kupon yok.</td></tr>"; }
+    return response::html(admin_view("admin_coupons.html", ["rows" => $html, "count" => count($rows)]));
+});
+route("POST", "/admin/coupons/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $code = string::trim(request::post("code"));
+    $kind = request::post("kind"); if ($kind != "fixed") { $kind = "percent"; }
+    $value = string::trim(request::post("value"));
+    if ($code != "") {
+        $ex = db::query($c, "SELECT id FROM coupons WHERE code = ?", [$code]);
+        if (count($ex) == 0) { db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES (?, ?, ?, 1)", [$code, $kind, $value]); }
+    }
+    return response::redirect("/admin/coupons");
+});
+
+// ── admin: orders ────────────────────────────────────────────────────────────
+route("GET", "/admin/orders", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
+    $rows_html = "";
+    foreach ($orders as $o) {
+        $mail = $o["email"];
+        if ($mail == "") { $mail = "—"; }
+        $rows_html = $rows_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($mail) . "</td><td>" . html::escape($o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    return response::html(admin_view("admin_orders.html", ["rows" => $rows_html, "count" => count($orders)]));
+});
+route("GET", "/admin/order/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
+    if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
+    $o = $orows[0];
+    $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
+    $items_html = "";
+    foreach ($items as $it) {
+        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
+    }
+    $mail = $o["email"];
+    if ($mail == "") { $mail = "—"; }
+    $statuses = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    $sel = "";
+    foreach ($statuses as $st) {
+        $selattr = "";
+        if ($st == $o["status"]) { $selattr = " selected"; }
+        $sel = $sel . "<option value=\"" . $st . "\"" . $selattr . ">" . $st . "</option>";
+    }
+    $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+    $addr = $o["address"]; if ($addr == null) { $addr = ""; } if ($addr == "") { $addr = "—"; }
+    $ph = $o["phone"]; if ($ph == null) { $ph = ""; } if ($ph == "") { $ph = "—"; }
+    return response::html(admin_view("admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
+});
+route("POST", "/admin/order/{id}/status", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $status = request::post("status");
+    $allowed = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    if (array::contains($allowed, $status)) {
+        db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
+    }
+    return response::redirect("/admin/order/" . $id);
+});
+
+// ── admin: users (role 'admin' only — RBAC) ──────────────────────────────────
+route("GET", "/admin/users", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "Bu sayfa yalnız admin rolü içindir."); }
+    $c = conn();
+    $users = db::query($c, "SELECT username, role FROM users ORDER BY id", []);
+    $rows = "";
+    foreach ($users as $u) {
+        $rows = $rows . "<tr><td>" . html::escape($u["username"]) . "</td><td>" . html::escape($u["role"]) . "</td></tr>";
+    }
+    return response::html(admin_view("admin_users.html", ["rows" => $rows, "count" => count($users)]));
+});
+route("POST", "/admin/users/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $u = string::trim(request::post("username"));
+    $p = request::post("password");
+    $role = request::post("role");
+    if ($role != "admin") { $role = "editor"; }
+    if ($u != "") {
+        if ($p != null) {
+            if ($p != "") {
+                $exists = db::query($c, "SELECT id FROM users WHERE username = ?", [$u]);
+                if (count($exists) == 0) {
+                    db::exec($c, "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)", [$u, auth::hash($p), $role, date::timestamp()]);
+                }
+            }
+        }
+    }
+    return response::redirect("/admin/users");
+});
+
+// ── admin: settings (role 'admin' only) ──────────────────────────────────────
+route("GET", "/admin/settings", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $cur_theme = setting_get($c, "theme", "default");
+    $topts = "";
+    foreach (["default", "aurora"] as $th) {
+        $sa = ""; if ($th == $cur_theme) { $sa = " selected"; }
+        $topts = $topts . "<option value=\"" . $th . "\"" . $sa . ">" . $th . "</option>";
+    }
+    $cur_skin = setting_get($c, "skin", "default");
+    $kopts = "";
+    foreach (["default", "ocean", "sunset", "dark"] as $sk) {
+        $sa = ""; if ($sk == $cur_skin) { $sa = " selected"; }
+        $kopts = $kopts . "<option value=\"" . $sk . "\"" . $sa . ">" . $sk . "</option>";
+    }
+    return response::html(admin_view("admin_settings.html", [
+        "s_title"    => setting_get($c, "site_title", "LookPress"),
+        "s_tagline"  => setting_get($c, "tagline", ""),
+        "s_currency" => setting_get($c, "currency", "&#8378;"),
+        "theme_options" => $topts,
+        "skin_options" => $kopts
+    ]));
+});
+route("POST", "/admin/settings", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    setting_set($c, "site_title", string::trim(request::post("site_title")));
+    setting_set($c, "tagline", string::trim(request::post("tagline")));
+    setting_set($c, "currency", string::trim(request::post("currency")));
+    $th = request::post("theme");
+    if (array::contains(["default", "aurora"], $th)) { setting_set($c, "theme", $th); }
+    $sk = request::post("skin");
+    if (array::contains(["default", "ocean", "sunset", "dark"], $sk)) { setting_set($c, "skin", $sk); }
+    settings_bust();
+    return response::redirect("/admin/settings");
+});

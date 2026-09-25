@@ -1,0 +1,105 @@
+// routes/public.lk — public site routes. Every path here is more specific than the
+// dynamic catch-alls in routes/dispatch.lk (used LAST), so first-match keeps them live.
+use db;
+use string;
+use json;
+use html;
+use date;
+use file;
+
+// ── home + blog index (lang-aware; tr = no prefix, en = /en) ──────────────────
+route("GET", "/",        function() { return home_render("tr"); });
+route("GET", "/en",      function() { return home_render("en"); });
+route("GET", "/blog",    function() { return blog_render("tr"); });
+route("GET", "/en/blog", function() { return blog_render("en"); });
+
+// ── media serve (public, by sha-hex name; strict whitelist rejects traversal) ─
+route("GET", "/media/{name}", function() {
+    $name = request::param("name");
+    if (!string::regex_match($name, "^[0-9a-f]{32}\\.[a-z0-9]{2,5}$")) { return response::status(404, "Not found"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT mime FROM media WHERE sha_name = ?", [$name]);
+    if (count($rows) == 0) { return response::status(404, "Not found"); }
+    $path = file::upload_dir() . "/media/" . $name;
+    if (!file::exists($path)) { return response::status(404, "Not found"); }
+    $bytes = file::read($path);
+    response::text($bytes);
+    response::header("Content-Type", $rows[0]["mime"]);
+    response::header("Cache-Control", "public, max-age=31536000, immutable");
+    return;
+});
+
+// ── search (SQL LIKE across published content; FTS5 is the measured next step) ─
+route("GET", "/search", function() {
+    $c = conn();
+    $q = request::get("q") ?? "";
+    $q = string::trim($q);
+    $results = ""; $count = 0;
+    if ($q != "") {
+        $like = "%" . $q . "%";
+        $rows = db::query($c, "SELECT c.type, c.slug, r.title, ct.url_pattern FROM content c JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0 AND (r.title LIKE ? OR r.body_md LIKE ?) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50", [$like, $like]);
+        $count = count($rows);
+        foreach ($rows as $r) {
+            $url = string::replace($r["url_pattern"], "{slug}", $r["slug"]);
+            $results = $results . "<li><a href=\"" . html::escape($url) . "\">" . html::escape($r["title"]) . "</a> <span class=\"muted\">(" . html::escape($r["type"]) . ")</span></li>";
+        }
+        if ($results == "") { $results = "<li class=\"muted\">\"" . html::escape($q) . "\" için sonuç yok.</li>"; }
+    }
+    return response::html(view("search.html", ["q" => $q, "count" => $count, "results" => $results]));
+});
+
+// ── syndication + crawlability: sitemap.xml · robots.txt · RSS feed ──────────
+route("GET", "/sitemap.xml", function() {
+    $c = conn();
+    $base = base_url();
+    $rows = db::query($c, "SELECT c.slug, ct.url_pattern FROM content c JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0", []);
+    $urls = "";
+    foreach ($rows as $r) {
+        $path = string::replace($r["url_pattern"], "{slug}", $r["slug"]);
+        $urls = $urls . "<url><loc>" . html::escape($base . $path) . "</loc></url>";
+    }
+    $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">" . $urls . "</urlset>";
+    response::text($xml);
+    response::header("Content-Type", "application/xml; charset=utf-8");
+    return;
+});
+route("GET", "/robots.txt", function() {
+    response::text("User-agent: *\nAllow: /\nSitemap: " . base_url() . "/sitemap.xml\n");
+    return;
+});
+route("GET", "/feed", function() {
+    $c = conn();
+    $base = base_url();
+    $posts = db::query($c, "SELECT c.slug, r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 20", []);
+    $items = "";
+    foreach ($posts as $p) {
+        $link = $base . "/blog/" . $p["slug"];
+        $desc = string::substr(html::strip($p["body_html"]), 0, 300);
+        $items = $items . "<item><title>" . html::escape($p["title"]) . "</title><link>" . html::escape($link) . "</link><description>" . html::escape($desc) . "</description></item>";
+    }
+    $t = site_title();
+    $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel><title>" . html::escape($t) . "</title><link>" . html::escape($base) . "</link><description>" . html::escape($t) . "</description>" . $items . "</channel></rss>";
+    response::text($xml);
+    response::header("Content-Type", "application/rss+xml; charset=utf-8");
+    return;
+});
+
+// ── forms (contact/lead → stored submissions; honeypot spam guard) ───────────
+route("GET", "/contact", function() {
+    $sent = request::get("sent") ?? "";
+    return response::html(view("contact.html", ["sent" => $sent]));
+});
+route("POST", "/forms/{key}", function() {
+    $c = conn();
+    $key = request::param("key");
+    // Honeypot: a hidden "website" field bots fill and humans never see. If set,
+    // silently accept-and-drop (don't tell the bot it failed).
+    $hp = request::post("website");
+    if ($hp != null) { if ($hp != "") { return response::redirect("/contact?sent=1"); } }
+    $name = request::post("name"); if ($name == null) { $name = ""; }
+    $email = request::post("email"); if ($email == null) { $email = ""; }
+    $message = request::post("message"); if ($message == null) { $message = ""; }
+    $data = ["name" => $name, "email" => $email, "message" => $message];
+    db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);
+    return response::redirect("/contact?sent=1");
+});

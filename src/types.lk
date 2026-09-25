@@ -1,0 +1,159 @@
+// src/types.lk — the type engine. Define a type in content_types and this drives
+// its admin form, server-side validation, and versioned-core write. No per-type
+// code: one generic set of helpers reads each type's declared field definitions.
+use db;
+use cache;
+use array;
+use json;
+use type;
+use string;
+use html;
+use date;
+use "../lib/markdown.lk";
+
+// ── dispatcher type-pattern cache ────────────────────────────────────────────
+// The request-time dispatcher resolves url_pattern -> type slug on EVERY public hit.
+// content_types changes rarely, so cache the whole (small) pattern->slug map for 60s
+// under ONE key. BUSTED on any content_types write (types_cache_bust) so a NEW type's
+// URL is live immediately — without the bust the new URL would lag up to the 60s TTL.
+function type_patterns($c) {
+    $m = cache::get("cms:type_patterns");
+    if ($m != null) { return $m; }
+    $m = array::new_assoc();
+    $rows = db::query($c, "SELECT slug, url_pattern FROM content_types", []);
+    foreach ($rows as $r) { $m = array::set($m, $r["url_pattern"], $r["slug"]); }
+    cache::set("cms:type_patterns", $m, 60);
+    return $m;
+}
+function type_for_pattern($c, $pattern) {
+    $m = type_patterns($c);
+    if (array::contains(array::keys($m), $pattern)) { return $m[$pattern]; }
+    return "";
+}
+function types_cache_bust() { cache::delete("cms:type_patterns"); }
+// Any type whose url_pattern is "/BASE/{slug}" is browsable as a listing at /BASE
+// (e.g. product -> /product, post -> /blog). Generic: no per-type listing code.
+function type_for_base($c, $base) { return type_for_pattern($c, $base . "/{slug}"); }
+
+// ── type engine: load a type + its field defs ───────────────────────────────
+function load_type($c, $slug) {
+    $rows = db::query($c, "SELECT slug, label, url_pattern, fields_json FROM content_types WHERE slug = ?", [$slug]);
+    if (count($rows) == 0) { return null; }
+    $t = $rows[0];
+    $t["fields"] = json::decode($t["fields_json"]);
+    return $t;
+}
+
+// Render one field's input HTML from its definition (+ current value).
+function field_input($c, $f, $value) {
+    $name = $f["name"];
+    $t = $f["type"];
+    $v = html::escape($value);
+    if ($t == "markdown" || $t == "textarea") {
+        return "<label>" . $name . "<textarea name=\"" . $name . "\" rows=\"10\">" . $v . "</textarea></label>";
+    }
+    if ($t == "bool") {
+        $chk = ""; if ($value == "1" || $value == "true") { $chk = " checked"; }
+        return "<label class=\"cb\"><input type=\"checkbox\" name=\"" . $name . "\" value=\"1\"" . $chk . "> " . $name . "</label>";
+    }
+    if ($t == "int" || $t == "decimal") {
+        return "<label>" . $name . "<input type=\"number\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "date") {
+        return "<label>" . $name . "<input type=\"date\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "select") {
+        $opts = "";
+        foreach ($f["choices"] as $ch) {
+            $sel = ""; if ($ch == $value) { $sel = " selected"; }
+            $opts = $opts . "<option value=\"" . html::escape($ch) . "\"" . $sel . ">" . html::escape($ch) . "</option>";
+        }
+        return "<label>" . $name . "<select name=\"" . $name . "\">" . $opts . "</select></label>";
+    }
+    if ($t == "relation") {
+        // single-select of existing content of the target type (multi-select + picker → Faz 6)
+        $target = $f["to"];
+        $rows = db::query($c, "SELECT c.id, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY r.title", [$target]);
+        $opts = "<option value=\"\">—</option>";
+        foreach ($rows as $row) {
+            $sel = ""; if (type::to_int($value) == type::to_int($row["id"])) { $sel = " selected"; }
+            $opts = $opts . "<option value=\"" . $row["id"] . "\"" . $sel . ">" . html::escape($row["title"]) . "</option>";
+        }
+        return "<label>" . $name . " (" . $target . ")<select name=\"" . $name . "\">" . $opts . "</select></label>";
+    }
+    // default: text
+    return "<label>" . $name . "<input name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+}
+
+function fields_form_html($c, $fields, $values) {
+    $h = "";
+    foreach ($fields as $f) {
+        $val = "";
+        if ($values != null) { $val = $values[$f["name"]]; }
+        $h = $h . field_input($c, $f, $val);
+    }
+    return $h;
+}
+
+// Server-side validation — form HTML is NOT security. Returns [errors[], values{}].
+function validate_post($c, $fields) {
+    $errors = [];
+    $values = [];
+    foreach ($fields as $f) {
+        $name = $f["name"];
+        $t = $f["type"];
+        $raw = request::post($name);
+        if ($t == "bool") {
+            $bv = "0"; if ($raw == "1") { $bv = "1"; }
+            $values = array::set($values, $name, $bv);
+        } else {
+            if ($raw == null) { $raw = ""; }
+            $raw = string::trim($raw);
+            $req = $f["required"];
+            if ($req && $raw == "") { $errors = array::push($errors, $name . " is required"); }
+            if ($t == "int" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+$")) { $errors = array::push($errors, $name . " must be an integer"); }
+            if ($t == "decimal" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+(\\.[0-9]+)?$")) { $errors = array::push($errors, $name . " must be a number"); }
+            if ($t == "select" && $raw != "") {
+                $ok = false; foreach ($f["choices"] as $ch) { if ($ch == $raw) { $ok = true; } }
+                if (!$ok) { $errors = array::push($errors, $name . " is not an allowed choice"); }
+            }
+            if ($t == "relation" && $raw != "") {
+                $ex = db::query($c, "SELECT id FROM content WHERE id = ? AND type = ?", [type::to_int($raw), $f["to"]]);
+                if (count($ex) == 0) { $errors = array::push($errors, $name . ": invalid relation target " . $raw); }
+            }
+            $values = array::set($values, $name, $raw);
+        }
+    }
+    return ["errors" => $errors, "values" => $values];
+}
+
+// A slug is unique per (lang, type); reject a collision gracefully instead of
+// letting the UNIQUE constraint 500 the edit form.
+function norm_lang($l) { if ($l == "en") { return "en"; } return "tr"; }
+function slug_taken($c, $type, $slug, $exclude_id, $lang) {
+    return count(db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = ? AND id != ?", [$type, $slug, $lang, $exclude_id])) > 0;
+}
+
+// ── versioned-core write: create/update content as a new revision ────────────
+function save_content($c, $type, $id, $slug, $values, $status, $lang) {
+    $title = $values["title"];
+    $body_md = $values["body"];
+    $body_html = markdown_to_html($body_md);
+    $fields_json = json::encode($values);
+    $ts = date::timestamp();
+    if ($id == 0) {
+        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", [$type, $slug, $lang, $status, $ts, $ts]);
+        $id = db::last_id($c);
+    } else {
+        db::exec($c, "UPDATE content SET slug = ?, lang = ?, status = ?, updated_at = ? WHERE id = ?", [$slug, $lang, $status, $ts, $id]);
+    }
+    // rev_no = max+1
+    $mx = db::query($c, "SELECT COALESCE(MAX(rev_no),0) AS m FROM revisions WHERE content_id = ?", [$id]);
+    $rev_no = type::to_int($mx[0]["m"]) + 1;
+    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'admin edit')", [$id, $rev_no, $title, $body_md, $body_html, $fields_json, $ts]);
+    $rid = db::last_id($c);
+    $prev = 0;
+    if ($status == "published") { $prev = $rid; }
+    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $id]);
+    return $id;
+}

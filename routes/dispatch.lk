@@ -1,0 +1,27 @@
+// routes/dispatch.lk — the dynamic per-type router. A new type auto-routes with NO
+// restart: url_patterns are resolved from the DB at REQUEST time (where db:: works)
+// and the closures take no use()-captured loop-local (avoiding a VM wrap).
+//
+// These generic patterns MUST be the LAST routes registered — every specific route
+// (in core/public/commerce/admin) wins by first-match. So this file is `use`d LAST.
+//
+//   1-segment  /{a}      → the type whose url_pattern is "/{slug}" (e.g. page), slug=a
+//   2-segment  /{a}/{b}  → the type whose url_pattern is "/{a}/{slug}" (post/product),
+//                          OR, when a == "en", a 1-segment page in English.
+// The /en prefix shifts every path one segment right; the same resolvers run with
+// lang="en". Default (tr) has no prefix. (Bare /en and /en/blog are routed in public.)
+route("GET", "/{a}", function() {
+    $c = conn();
+    return resolve_1seg($c, request::param("a"), "tr");
+});
+route("GET", "/{a}/{b}", function() {
+    $c = conn();
+    $a = request::param("a");
+    if ($a == "en") { return resolve_1seg($c, request::param("b"), "en"); }
+    return resolve_2seg($c, $a, request::param("b"), "tr");
+});
+route("GET", "/{a}/{b}/{c}", function() {
+    $c = conn();
+    if (request::param("a") == "en") { return resolve_2seg($c, request::param("b"), request::param("c"), "en"); }
+    return response::status(404, view("notfound.html", []));
+});

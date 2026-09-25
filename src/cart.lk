@@ -1,0 +1,37 @@
+// src/cart.lk — commerce helpers: the session-backed cart and coupon maths.
+// Commerce as an extension of the type engine: a Product is catalog data, the cart
+// is a live island. No payment here (that is a Phase-6 package).
+use db;
+use session;
+use json;
+use string;
+use type;
+
+function cart_get() {
+    session::start();
+    $raw = session::get("cart");
+    if ($raw == null) { return []; }
+    if ($raw == "") { return []; }
+    $parsed = json::decode($raw);
+    if ($parsed == null) { return []; }
+    return $parsed;
+}
+function cart_save($cart) { session::start(); session::set("cart", json::encode($cart)); }
+
+// ── coupons ──────────────────────────────────────────────────────────────────
+function coupon_code() { session::start(); $x = session::get("coupon"); if ($x == null) { return ""; } return $x; }
+function coupon_row($c, $code) {
+    if ($code == "") { return null; }
+    $rows = db::query($c, "SELECT code, kind, value FROM coupons WHERE code = ? AND active = 1", [$code]);
+    if (count($rows) == 0) { return null; }
+    return $rows[0];
+}
+function coupon_discount($subtotal, $row) {
+    if ($row == null) { return 0.0; }
+    $v = type::to_float($row["value"]);
+    if ($row["kind"] == "percent") { return $subtotal * $v / 100.0; }
+    return $v;
+}
+
+// Media uploads are NOT versioned content — a separate table names files by sha256.
+function media_mimes() { return ["image/png", "image/jpeg", "image/gif", "image/webp"]; }

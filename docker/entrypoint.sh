@@ -25,5 +25,5 @@ echo "[lookpress] migrating (idempotent) — v2 versioned core + orders"
 lk setup_v2.lk
 touch /data/.lp_initialized
 
-echo "[lookpress] serving app_v2.lk on :7400"
-exec lk-fcgi --mode http --port 7400 --workers 4 app_v2.lk
+echo "[lookpress] serving app.lk on :7400"
+exec lk-fcgi --mode http --port 7400 --workers 4 app.lk
