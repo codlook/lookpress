@@ -506,6 +506,22 @@ function render_fields_html($c, $type, $fields_json) {
 }
 
 // ── public: published_rev ONLY. Serve content of a type by slug. ─────────────
+// hreflang alternates — links a content item's language variants for search engines
+// (only when the same slug is published in more than one language).
+function hreflang_links($c, $type, $slug) {
+    $rows = db::query($c, "SELECT lang FROM content WHERE type = ? AND slug = ? AND published_rev > 0", [$type, $slug]);
+    if (count($rows) < 2) { return ""; }
+    $tp = db::query($c, "SELECT url_pattern FROM content_types WHERE slug = ?", [$type]);
+    if (count($tp) == 0) { return ""; }
+    $path = string::replace($tp[0]["url_pattern"], "{slug}", $slug);
+    $base = base_url();
+    $out = "";
+    foreach ($rows as $r) {
+        $href = $base . lang_prefix($r["lang"]) . $path;
+        $out = $out . "<link rel=\"alternate\" hreflang=\"" . html::escape($r["lang"]) . "\" href=\"" . html::escape($href) . "\">";
+    }
+    return $out;
+}
 function render_published($type, $slug, $lang) {
     $c = conn();
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
@@ -532,7 +548,7 @@ function render_published($type, $slug, $lang) {
             $jsonld = json::encode($ld);
         }
     }
-    $head = seo_head($rows[0]["title"], $desc, "website", $jsonld);
+    $head = seo_head($rows[0]["title"], $desc, "website", $jsonld) . hreflang_links($c, $type, $slug);
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra, "head_extra" => $head]));
 }
 
