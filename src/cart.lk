@@ -32,6 +32,3 @@ function coupon_discount($subtotal, $row) {
     if ($row["kind"] == "percent") { return $subtotal * $v / 100.0; }
     return $v;
 }
-
-// Media uploads are NOT versioned content — a separate table names files by sha256.
-function media_mimes() { return ["image/png", "image/jpeg", "image/gif", "image/webp"]; }

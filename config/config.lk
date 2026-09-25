@@ -1,0 +1,28 @@
+// config/config.lk — application configuration in ONE place. These are the small,
+// fixed lists and defaults that the rest of the app must agree on: installed themes
+// and skins, the order-status vocabulary, allowed upload types, and branding
+// defaults. Keeping them here (not inlined in handlers) means adding a theme or an
+// order status is a one-line change in a single file — no hunting through routes.
+//
+// Runtime/secret configuration (DB_DSN, ADMIN_PASSWORD, ports) stays in the
+// environment, and per-site editable settings (title, tagline, currency) live in
+// the DB settings table — this file holds only the code-level constants.
+
+// Installed site themes (directories under views/themes/). The active one is chosen
+// in admin settings; add a theme by dropping views/themes/<name>/ and listing it here.
+function cfg_themes() { return ["default", "aurora"]; }
+
+// Colour skins the default layout understands (data-theme palettes).
+function cfg_skins() { return ["default", "ocean", "sunset", "dark"]; }
+
+// The order-status lifecycle. Both the admin status dropdown and its server-side
+// validation read this one list, so they can never drift apart.
+function cfg_order_statuses() { return ["received", "preparing", "shipped", "delivered", "cancelled"]; }
+
+// Upload types the media library accepts (checked server-side on upload).
+function cfg_media_mimes() { return ["image/png", "image/jpeg", "image/gif", "image/webp"]; }
+
+// Branding defaults — used when the DB settings table has no value yet. Change the
+// product name in ONE place here.
+function cfg_default_title() { return "LookPress"; }
+function cfg_default_currency() { return "&#8378;"; }

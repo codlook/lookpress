@@ -33,7 +33,7 @@ function setting_set($c, $key, $val) {
     else { db::exec($c, "INSERT INTO settings (ns, skey, sval) VALUES ('core', ?, ?)", [$key, $val]); }
 }
 function settings_bust() { cache::delete("core:settings"); }
-function site_title() { return setting_get(conn(), "site_title", "LookPress"); }
+function site_title() { return setting_get(conn(), "site_title", cfg_default_title()); }
 
 // A THEME is a template directory (views/themes/{theme}/) that may override any
 // public template; missing ones fall back to views/themes/default. A SKIN is a

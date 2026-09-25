@@ -250,7 +250,7 @@ route("GET", "/admin/media", function() {
 route("POST", "/admin/media", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     $f = null;
-    try { $f = request::file("file", ["max_size" => 5242880, "allow_mime" => media_mimes()]); } catch ($e) { $f = null; }
+    try { $f = request::file("file", ["max_size" => 5242880, "allow_mime" => cfg_media_mimes()]); } catch ($e) { $f = null; }
     if ($f == null) {
         $c = conn();
         $items = db::query($c, "SELECT id, sha_name, original, mime, size FROM media ORDER BY created_at DESC, id DESC", []);
@@ -355,7 +355,7 @@ route("GET", "/admin/order/{id}", function() {
     }
     $mail = $o["email"];
     if ($mail == "") { $mail = "—"; }
-    $statuses = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    $statuses = cfg_order_statuses();
     $sel = "";
     foreach ($statuses as $st) {
         $selattr = "";
@@ -372,7 +372,7 @@ route("POST", "/admin/order/{id}/status", function() {
     $c = conn();
     $id = request::param("id");
     $status = request::post("status");
-    $allowed = ["received", "preparing", "shipped", "delivered", "cancelled"];
+    $allowed = cfg_order_statuses();
     if (array::contains($allowed, $status)) {
         db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
     }
@@ -419,20 +419,20 @@ route("GET", "/admin/settings", function() {
     $c = conn();
     $cur_theme = setting_get($c, "theme", "default");
     $topts = "";
-    foreach (["default", "aurora"] as $th) {
+    foreach (cfg_themes() as $th) {
         $sa = ""; if ($th == $cur_theme) { $sa = " selected"; }
         $topts = $topts . "<option value=\"" . $th . "\"" . $sa . ">" . $th . "</option>";
     }
     $cur_skin = setting_get($c, "skin", "default");
     $kopts = "";
-    foreach (["default", "ocean", "sunset", "dark"] as $sk) {
+    foreach (cfg_skins() as $sk) {
         $sa = ""; if ($sk == $cur_skin) { $sa = " selected"; }
         $kopts = $kopts . "<option value=\"" . $sk . "\"" . $sa . ">" . $sk . "</option>";
     }
     return response::html(admin_view("admin_settings.html", [
-        "s_title"    => setting_get($c, "site_title", "LookPress"),
+        "s_title"    => setting_get($c, "site_title", cfg_default_title()),
         "s_tagline"  => setting_get($c, "tagline", ""),
-        "s_currency" => setting_get($c, "currency", "&#8378;"),
+        "s_currency" => setting_get($c, "currency", cfg_default_currency()),
         "theme_options" => $topts,
         "skin_options" => $kopts
     ]));
@@ -445,9 +445,9 @@ route("POST", "/admin/settings", function() {
     setting_set($c, "tagline", string::trim(request::post("tagline")));
     setting_set($c, "currency", string::trim(request::post("currency")));
     $th = request::post("theme");
-    if (array::contains(["default", "aurora"], $th)) { setting_set($c, "theme", $th); }
+    if (array::contains(cfg_themes(), $th)) { setting_set($c, "theme", $th); }
     $sk = request::post("skin");
-    if (array::contains(["default", "ocean", "sunset", "dark"], $sk)) { setting_set($c, "skin", $sk); }
+    if (array::contains(cfg_skins(), $sk)) { setting_set($c, "skin", $sk); }
     settings_bust();
     return response::redirect("/admin/settings");
 });

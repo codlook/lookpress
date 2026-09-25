@@ -2,6 +2,7 @@
 // application together and owns nothing but composition. Everything lives in a
 // module with one responsibility:
 //
+//   config/config.lk installed themes/skins, order statuses, upload types, branding
 //   src/core.lk      framework: DB, cached settings, view rendering, SEO, auth gates
 //   src/types.lk     the type engine: field inputs, validation, versioned-core write
 //   src/render.lk    public presentation: pages, listings, home/blog, URL resolvers
@@ -36,6 +37,9 @@ use auth;
 if (env("ADMIN_PASSWORD", "") == "") {
     log::warn("ADMIN_PASSWORD is not set — /admin login is DISABLED. Set ADMIN_PASSWORD to enable it.");
 }
+
+// ── configuration (constants the whole app agrees on) ────────────────────────
+use "config/config.lk";
 
 // ── domain modules (functions only; no routes) ───────────────────────────────
 use "src/core.lk";
