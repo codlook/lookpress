@@ -57,6 +57,8 @@ Application code, routes and views are separated — no monolith, and every view
 
 ```
 app.lk                 Entry point — composition only: loads modules in order.
+config/                Configuration in one place
+  config.lk              installed themes/skins, order statuses, upload types, branding
 src/                   Application code (one responsibility per module)
   core.lk                framework: DB, cached settings, view rendering, SEO, auth gates
   types.lk               the type engine: field inputs, validation, versioned-core write
