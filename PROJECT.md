@@ -125,7 +125,7 @@ Users/RBAC/CSRF (⑤) and the extension API (④) **must** land before any third
 extension. You cannot open a platform to extensions before the multi-user security model exists.
 This is the reference-app's "harden before a second author" lock, scaled to the platform.
 
-## Phases (slice discipline — each with FRICTION.md, each claim measured)
+## Phases (slice discipline — each verified end to end, each claim measured)
 
 ```
 Faz 0  repo + this design doc                                   ✓ (approved; being revised to platform)
