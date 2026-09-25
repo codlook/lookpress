@@ -70,7 +70,13 @@ function view($tpl, $data) {
 }
 // Admin has its OWN UI, independent of the active site theme (admin/layout) — a
 // theme ships only public views, so the theme ecosystem stays light.
-function admin_view($tpl, $data) { return template::render("admin/" . $tpl, $data); }
+function admin_view($tpl, $data) {
+    session::start();
+    $un = session::get("uname"); if ($un == null) { $un = ""; }
+    $data["nav_user"] = $un;
+    $data["nav_super"] = is_super();
+    return template::render("admin/" . $tpl, $data);
+}
 
 // ── SEO: per-page meta + Open Graph + JSON-LD (Product schema for priced items) ─
 // The site renders dynamically, so a product's JSON-LD price is always fresh (the

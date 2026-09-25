@@ -1,6 +1,5 @@
-{#extends "admin/layout"}
+{#extends "admin/auth"}
 {#block "content"}
-<h2>Admin login</h2>
 {#if $error}<p class="error">{$error}</p>{/if}
 <form method="post" action="/admin/login">
 <label>Kullanıcı adı <input type="text" name="username" autofocus autocomplete="username"></label>
