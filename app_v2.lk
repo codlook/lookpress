@@ -261,10 +261,33 @@ route("GET", "/admin", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     session::start();
     $c = conn();
+    $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
+    // stats
+    $n_content  = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", [])[0]["n"]);
+    $n_products = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'product' AND published_rev > 0", [])[0]["n"]);
+    $n_orders   = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM orders", [])[0]["n"]);
+    $revenue    = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders", [])[0]["r"];
+    $n_subs     = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM form_submissions", [])[0]["n"]);
+    // recent orders
+    $recent = db::query($c, "SELECT id, cust_name, total, status FROM orders ORDER BY id DESC LIMIT 5", []);
+    $recent_html = "";
+    foreach ($recent as $o) {
+        $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+        $recent_html = $recent_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($cn) . "</td><td>" . html::escape("" . $o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($recent_html == "") { $recent_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    // content types
     $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
-    $uname = session::get("uname");
-    if ($uname == null) { $uname = ""; }
-    return response::html(admin_view("admin_types.html", ["types" => $types, "uname" => $uname, "is_super" => is_super()]));
+    $types_html = "";
+    foreach ($types as $t) {
+        $types_html = $types_html . "<li><a href=\"/admin/type/" . $t["slug"] . "\">" . html::escape($t["label"]) . "</a> <span class=\"muted\">(" . html::escape($t["slug"]) . ")</span></li>";
+    }
+    return response::html(admin_view("admin_dashboard.html", [
+        "uname" => $uname, "is_super" => is_super(),
+        "n_content" => $n_content, "n_products" => $n_products, "n_orders" => $n_orders,
+        "revenue" => "" . $revenue, "n_subs" => $n_subs,
+        "recent" => $recent_html, "types_html" => $types_html
+    ]));
 });
 
 // ── type-admin: create a content type from the admin (closes Step 3's gate) ──

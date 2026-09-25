@@ -61,7 +61,8 @@ code_is "login page"        "/admin/login" 200
 has     "admin shell"       "/admin/login" "LookPress Admin"
 # admin login
 curl -s -c "$EJAR" -b "$EJAR" -X POST -d "username=admin&password=$ADMIN_PW" "$BASE/admin/login" >/dev/null
-if body -b "$EJAR" "$BASE/admin" | grep -q "Content types"; then ok "admin login"; else bad "admin login"; fi
+if body -b "$EJAR" "$BASE/admin" | grep -q "Panel"; then ok "admin login (dashboard)"; else bad "admin login"; fi
+if body -b "$EJAR" "$BASE/admin" | grep -q "Ciro"; then ok "dashboard stats"; else bad "dashboard stats"; fi
 n=$((n+1))
 # admin-only page reachable by admin
 if body -b "$EJAR" "$BASE/admin/users" | grep -q "Kullanıcılar"; then ok "admin sees users"; else bad "admin sees users"; fi
