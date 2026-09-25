@@ -1,5 +1,10 @@
-# Shell scripts and the Dockerfile must stay LF — they run inside Linux
-# containers, and CRLF (from a Windows checkout) breaks /bin/sh and COPY.
+# The whole project runs inside a Linux container, so every text file is stored
+# and checked out with LF — a Windows CRLF checkout breaks /bin/sh + COPY, and
+# keeping source/views/templates LF stops the "LF will be replaced by CRLF" noise.
 *.sh          text eol=lf
 Dockerfile    text eol=lf
 docker/*      text eol=lf
+*.lk          text eol=lf
+*.html        text eol=lf
+*.md          text eol=lf
+*.yml         text eol=lf
