@@ -1,0 +1,28 @@
+name: smoke
+# Boots the LookPress Docker stack and runs the end-to-end smoke suite on every
+# push / PR — the critical flows (public, multilingual, SEO, commerce, admin/RBAC)
+# must stay green.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & start LookPress
+        run: docker compose up --build -d
+      - name: Wait for the app
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/ >/dev/null 2>&1; then echo "up"; exit 0; fi
+            sleep 2
+          done
+          echo "app did not come up"; docker compose logs; exit 1
+      - name: Smoke suite
+        run: bash test/smoke.sh http://localhost:8080
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs

@@ -133,6 +133,39 @@ if (count($has_user) == 0) {
     }
 }
 
+// ── demo content (opt-in: LOOKPRESS_SEED=1, once) — a populated first run and the
+// fixtures the smoke suite asserts (a tr + en product under the same slug). ──────
+function seed_demo_item($c, $type, $slug, $lang, $title, $body, $fields) {
+    $ex = db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = ?", [$type, $slug, $lang]);
+    if (count($ex) > 0) { return 0; }
+    $ts = date::timestamp();
+    db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, ?, 'published', ?, ?)", [$type, $slug, $lang, $ts, $ts]);
+    $cid = db::last_id($c);
+    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, ?, 0, ?, 'demo seed')", [$cid, $title, $body, "<p>" . $body . "</p>", json::encode($fields), $ts]);
+    $rid = db::last_id($c);
+    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $rid, $cid]);
+    return 1;
+}
+if (env("LOOKPRESS_SEED", "0") == "1") {
+    // A commerce-capable demo needs a "product" content type (title/body/price/sku/image).
+    seed_type($c, "product", "Product", "/product/{slug}", [
+        ["name" => "title", "type" => "text",     "required" => true],
+        ["name" => "body",  "type" => "markdown", "required" => false],
+        ["name" => "price", "type" => "text",     "required" => true],
+        ["name" => "sku",   "type" => "text",     "required" => false],
+        ["name" => "image", "type" => "text",     "required" => false]
+    ]);
+    $have_prod = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
+    if (count($have_prod) == 0) {
+        $pf = ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""];
+        seed_demo_item($c, "product", "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", $pf);
+        seed_demo_item($c, "product", "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", $pf);
+        seed_demo_item($c, "product", "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => ""]);
+        seed_demo_item($c, "page",    "about",          "en", "About us", "LookPress is a pure-LOOK site + commerce platform.", []);
+        print("=== seeded demo content (products tr/en + en page) ===\n");
+    }
+}
+
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {
     $rows = db::query($c, $sql, []);
