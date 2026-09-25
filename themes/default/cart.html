@@ -5,6 +5,12 @@
 <thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th><th>Tutar</th><th></th></tr></thead>
 <tbody>{!$rows}</tbody>
 </table>
+<form method="post" action="/cart/coupon" class="coupon-form">
+  <input type="text" name="code" value="{$code}" placeholder="Kupon kodu (ör. WELCOME10)">
+  <button>Uygula</button>
+</form>
+<p class="muted">Ara toplam: {$subtotal} &#8378;</p>
+{!$disc_row}
 <p class="cart-total">Toplam: <b>{$total} &#8378;</b></p>
 <form method="post" action="/checkout" class="checkout-fields">
   <input type="text" name="cust_name" placeholder="Ad Soyad" required>

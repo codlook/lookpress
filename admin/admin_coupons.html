@@ -1,0 +1,15 @@
+{#extends "admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Kuponlar <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
+<table>
+<thead><tr><th>Kod</th><th>Tür</th><th>Değer</th><th>Aktif</th></tr></thead>
+<tbody>{!$rows}</tbody>
+</table>
+<h3>Yeni kupon</h3>
+<form method="post" action="/admin/coupons/new" class="user-form">
+  <label>Kod <input type="text" name="code" required></label>
+  <label>Tür <select name="kind"><option value="percent">yüzde (%)</option><option value="fixed">sabit (₺)</option></select></label>
+  <label>Değer <input type="text" name="value" placeholder="10" required></label>
+  <button type="submit">Ekle</button>
+</form>
+{/block}

@@ -77,6 +77,13 @@ $migrations = [
         "form_key"   => "string(80)",
         "data_json"  => "text",
         "created_at" => "int default=0"
+    ]],
+    ["id" => "v2_0009_coupons", "create_table" => "coupons", "columns" => [
+        "id"     => "pk",
+        "code"   => "string(40) unique",
+        "kind"   => "string(10) default=percent",
+        "value"  => "string(20) default=0",
+        "active" => "int default=1"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -97,6 +104,7 @@ function ensure_column($c, $table, $col, $decl) {
 ensure_column($c, "orders", "cust_name", "VARCHAR(120) DEFAULT ''");
 ensure_column($c, "orders", "address",   "TEXT DEFAULT ''");
 ensure_column($c, "orders", "phone",     "VARCHAR(40) DEFAULT ''");
+ensure_column($c, "orders", "coupon",    "VARCHAR(40) DEFAULT ''");
 
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
@@ -163,6 +171,10 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
         seed_demo_item($c, "product", "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => ""]);
         seed_demo_item($c, "page",    "about",          "en", "About us", "LookPress is a pure-LOOK site + commerce platform.", []);
         print("=== seeded demo content (products tr/en + en page) ===\n");
+    }
+    $hc = db::query($c, "SELECT id FROM coupons LIMIT 1", []);
+    if (count($hc) == 0) {
+        db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES ('WELCOME10', 'percent', '10', 1)", []);
     }
 }
 

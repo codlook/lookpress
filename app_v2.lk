@@ -798,6 +798,52 @@ function cart_get() {
 }
 function cart_save($cart) { session::start(); session::set("cart", json::encode($cart)); }
 
+// ── coupons ──────────────────────────────────────────────────────────────────
+function coupon_code() { session::start(); $x = session::get("coupon"); if ($x == null) { return ""; } return $x; }
+function coupon_row($c, $code) {
+    if ($code == "") { return null; }
+    $rows = db::query($c, "SELECT code, kind, value FROM coupons WHERE code = ? AND active = 1", [$code]);
+    if (count($rows) == 0) { return null; }
+    return $rows[0];
+}
+function coupon_discount($subtotal, $row) {
+    if ($row == null) { return 0.0; }
+    $v = type::to_float($row["value"]);
+    if ($row["kind"] == "percent") { return $subtotal * $v / 100.0; }
+    return $v;
+}
+route("POST", "/cart/coupon", function() {
+    session::start();
+    session::set("coupon", string::trim(request::post("code")));
+    return response::redirect("/cart");
+});
+route("GET", "/admin/coupons", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT code, kind, value, active FROM coupons ORDER BY id DESC", []);
+    $html = "";
+    foreach ($rows as $r) {
+        $act = "hayır"; if (type::to_int($r["active"]) == 1) { $act = "evet"; }
+        $html = $html . "<tr><td>" . html::escape($r["code"]) . "</td><td>" . html::escape($r["kind"]) . "</td><td>" . html::escape($r["value"]) . "</td><td>" . $act . "</td></tr>";
+    }
+    if ($html == "") { $html = "<tr><td colspan=\"4\" class=\"muted\">Kupon yok.</td></tr>"; }
+    return response::html(admin_view("admin_coupons.html", ["rows" => $html, "count" => count($rows)]));
+});
+route("POST", "/admin/coupons/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $code = string::trim(request::post("code"));
+    $kind = request::post("kind"); if ($kind != "fixed") { $kind = "percent"; }
+    $value = string::trim(request::post("value"));
+    if ($code != "") {
+        $ex = db::query($c, "SELECT id FROM coupons WHERE code = ?", [$code]);
+        if (count($ex) == 0) { db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES (?, ?, ?, 1)", [$code, $kind, $value]); }
+    }
+    return response::redirect("/admin/coupons");
+});
+
 route("POST", "/cart/add", function() {
     $c = conn();
     $slug = request::post("slug");
@@ -830,15 +876,23 @@ route("POST", "/cart/remove", function() {
 });
 
 route("GET", "/cart", function() {
+    $c = conn();
     $cart = cart_get();
-    $rows_html = ""; $total = 0.0;
+    $rows_html = ""; $subtotal = 0.0;
     foreach ($cart as $it) {
         $line = type::to_float($it["price"]) * $it["qty"];
-        $total = $total + $line;
+        $subtotal = $subtotal + $line;
         $rows_html = $rows_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td><td>" . $line . " &#8378;</td><td><form method=\"post\" action=\"/cart/remove\" class=\"inline\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($it["slug"]) . "\"><button class=\"del\">&times;</button></form></td></tr>";
     }
     if ($rows_html == "") { $rows_html = "<tr><td colspan=\"5\" class=\"muted\">Sepetiniz boş.</td></tr>"; }
-    return response::html(view("cart.html", ["rows" => $rows_html, "total" => $total, "count" => count($cart)]));
+    $code = coupon_code();
+    $crow = coupon_row($c, $code);
+    $disc = coupon_discount($subtotal, $crow);
+    if ($disc > $subtotal) { $disc = $subtotal; }
+    $total = $subtotal - $disc;
+    $disc_row = "";
+    if ($crow != null) { $disc_row = "<p class=\"muted\">Kupon <b>" . html::escape($code) . "</b>: -" . $disc . " &#8378;</p>"; }
+    return response::html(view("cart.html", ["rows" => $rows_html, "subtotal" => $subtotal, "disc_row" => $disc_row, "total" => $total, "count" => count($cart), "code" => html::escape($code)]));
 });
 
 route("POST", "/checkout", function() {
@@ -852,16 +906,23 @@ route("POST", "/checkout", function() {
     $cust_name = request::post("cust_name"); if ($cust_name == null) { $cust_name = ""; }
     $address = request::post("address"); if ($address == null) { $address = ""; }
     $phone = request::post("phone"); if ($phone == null) { $phone = ""; }
-    $total = 0.0;
-    foreach ($cart as $it) { $total = $total + type::to_float($it["price"]) * $it["qty"]; }
+    $subtotal = 0.0;
+    foreach ($cart as $it) { $subtotal = $subtotal + type::to_float($it["price"]) * $it["qty"]; }
+    $code = coupon_code();
+    $crow = coupon_row($c, $code);
+    $disc = coupon_discount($subtotal, $crow);
+    if ($disc > $subtotal) { $disc = $subtotal; }
+    $total = $subtotal - $disc;
+    $applied = ""; if ($crow != null) { $applied = $code; }
     $ts = date::timestamp();
-    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, total, status, created_at) VALUES (?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, "" . $total, $ts]);
+    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts]);
     $oid = db::last_id($c);
     foreach ($cart as $it) {
         db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty) VALUES (?, ?, ?, ?, ?)", [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"]]);
     }
     $n = count($cart);
     cart_save([]);
+    session::start(); session::set("coupon", "");
     return response::html(view("checkout.html", ["count" => $n, "order_id" => $oid, "total" => $total]));
 });
 
