@@ -197,6 +197,9 @@
  .fb-req input{width:auto;margin:0}
  .fb-del{padding:4px 10px;font-size:15px;line-height:1}
  .fb-bar{display:flex;gap:8px;align-items:center;margin:4px 0 6px}
+ .menu-form{max-width:560px}
+ .menu-row{display:flex;gap:8px;margin-bottom:8px}
+ .menu-row input{margin-top:0;flex:1}
 </style></head>
 <body>
 <div class="layout">
@@ -213,7 +216,8 @@
 {#if $nav_manage}   <div class="grp">Yönetim</div>
 {#if $can_users}   <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
 {/if}{#if $can_roles}   <a href="/admin/roles" data-nav="/admin/roles"><span class="ic">◈</span> Roller &amp; Yetkiler</a>
-{/if}{#if $can_settings}   <a href="/admin/themes" data-nav="/admin/themes"><span class="ic">◪</span> Temalar</a>
+{/if}{#if $can_settings}   <a href="/admin/menu" data-nav="/admin/menu"><span class="ic">☰</span> Menü</a>
+   <a href="/admin/themes" data-nav="/admin/themes"><span class="ic">◪</span> Temalar</a>
    <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
 {/if}{/if}  </nav>
   <div class="sfoot">

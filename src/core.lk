@@ -36,6 +36,16 @@ function setting_set($c, $key, $val) {
 function settings_bust() { cache::delete("core:settings"); }
 function site_title() { return setting_get(conn(), "site_title", cfg_default_title()); }
 
+// Managed navigation menu (items = [{label,url}]) by location; the site header
+// renders the "primary" menu. Empty list if none defined.
+function menu_items($c, $loc) {
+    $rows = db::query($c, "SELECT items_json FROM menus WHERE location = ?", [$loc]);
+    if (count($rows) == 0) { return []; }
+    $items = json::decode($rows[0]["items_json"]);
+    if ($items == null) { return []; }
+    return $items;
+}
+
 // A THEME is a template directory (views/themes/{theme}/) that may override any
 // public template; missing ones fall back to views/themes/default. A SKIN is a
 // colour palette (data-theme) applied by the default layout. Independent settings.
@@ -77,6 +87,7 @@ function view($tpl, $data) {
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
     // Per-page browser <title>; defaults to the site name when a view doesn't set one.
     if (!array::contains(array::keys($data), "page_title")) { $data["page_title"] = site_title(); }
+    if (!array::contains(array::keys($data), "nav_items")) { $data["nav_items"] = menu_items(conn(), "primary"); }
     return template::render(theme_tpl($theme, $tpl), $data);
 }
 // Admin chrome data every admin page needs: the logged-in user, the super flag,
@@ -121,6 +132,7 @@ function ext_view($ext, $tpl, $data) {
     $data["skin"] = active_skin();
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
     if (!array::contains(array::keys($data), "page_title")) { $data["page_title"] = site_title(); }
+    if (!array::contains(array::keys($data), "nav_items")) { $data["nav_items"] = menu_items(conn(), "primary"); }
     return template::render("extensions/" . $ext . "/views/" . $tpl, $data);
 }
 function ext_admin_view($ext, $tpl, $data) {

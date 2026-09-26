@@ -78,6 +78,11 @@ $migrations = [
         "title"       => "string(120)",
         "fields_json" => "text",
         "created_at"  => "int default=0"
+    ]],
+    ["id" => "v2_0012_menus", "create_table" => "menus", "columns" => [
+        "id"         => "pk",
+        "location"   => "string(40) unique",
+        "items_json" => "text"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -133,6 +138,15 @@ function seed_role($c, $name, $label, $perms, $sys) {
 }
 seed_role($c, "admin",  "Yönetici", [], 1);
 seed_role($c, "editor", "Editör",   ["content", "media", "forms"], 1);
+
+// ── seed the primary navigation menu (idempotent) so the site header has links ─
+if (count(db::query($c, "SELECT id FROM menus WHERE location = 'primary'", [])) == 0) {
+    db::exec($c, "INSERT INTO menus (location, items_json) VALUES ('primary', ?)", [json::encode([
+        ["label" => "Mağaza", "url" => "/product"],
+        ["label" => "Blog",   "url" => "/blog"],
+        ["label" => "İletişim", "url" => "/contact"]
+    ])]);
+}
 
 // ── seed the first admin user (once) from ADMIN_PASSWORD ──────────────────────
 // The env var is the SEED password for the initial `admin` account; change it

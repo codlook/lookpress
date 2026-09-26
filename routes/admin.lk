@@ -585,6 +585,39 @@ route("POST", "/admin/themes/activate", function() {
     return response::redirect("/admin/themes");
 });
 
+// ── admin: primary navigation menu (8 label/url slots, no JS) ─────────────────
+route("GET", "/admin/menu", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $items = menu_items($c, "primary");
+    $slots = [];
+    foreach ([0, 1, 2, 3, 4, 5, 6, 7] as $idx) {
+        $lbl = ""; $url = "";
+        if ($idx < count($items)) { $lbl = $items[$idx]["label"]; $url = $items[$idx]["url"]; }
+        $slots = array::push($slots, ["n" => $idx, "label" => $lbl, "url" => $url]);
+    }
+    return response::html(admin_view("admin_menu.html", ["slots" => $slots]));
+});
+route("POST", "/admin/menu", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $items = [];
+    foreach ([0, 1, 2, 3, 4, 5, 6, 7] as $idx) {
+        $lbl = string::trim(request::post("label_" . $idx));
+        $url = string::trim(request::post("url_" . $idx));
+        if ($lbl != "" && $url != "") { $items = array::push($items, ["label" => $lbl, "url" => $url]); }
+    }
+    $ij = json::encode($items);
+    if (count(db::query($c, "SELECT id FROM menus WHERE location = 'primary'", [])) > 0) {
+        db::exec($c, "UPDATE menus SET items_json = ? WHERE location = 'primary'", [$ij]);
+    } else {
+        db::exec($c, "INSERT INTO menus (location, items_json) VALUES ('primary', ?)", [$ij]);
+    }
+    return response::redirect("/admin/menu");
+});
+
 // ── admin: settings (role 'admin' only) ──────────────────────────────────────
 route("GET", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }

@@ -1,0 +1,10 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Menü <span class="muted">(birincil)</span></h2></div>
+<p class="muted" style="font-size:13px;margin:0 0 14px">Sitenin üst menüsü. Boş satırlar yok sayılır. URL örnekleri: <code>/product</code>, <code>/blog</code>, <code>/contact</code>, <code>/haber</code>, <code>/hakkimizda</code>.</p>
+<form method="post" action="/admin/menu" class="menu-form">
+{#each $slots as $s}<div class="menu-row"><input name="label_{$s.n}" value="{$s.label}" placeholder="Etiket"><input name="url_{$s.n}" value="{$s.url}" placeholder="/adres"></div>
+{/each}
+<button type="submit">Kaydet</button>
+</form>
+{/block}
