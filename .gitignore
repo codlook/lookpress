@@ -8,3 +8,6 @@ build-next/
 
 # local secrets
 .env
+
+# local backup archives (scripts/backup.sh default --out)
+backups/
