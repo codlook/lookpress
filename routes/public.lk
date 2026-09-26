@@ -8,6 +8,10 @@ use date;
 use file;
 use array;
 
+// Scheduled publishing: flip any due items live before dispatch (once per request).
+// Not a route — before_route runs ahead of matching and costs no route budget.
+before_route(function() { activate_scheduled(conn()); });
+
 // ── home + blog index (lang-aware; tr = no prefix, en = /en) ──────────────────
 route("GET", "/",        function() { return home_render("tr"); });
 route("GET", "/en",      function() { return home_render("en"); });

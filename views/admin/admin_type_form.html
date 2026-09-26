@@ -17,6 +17,8 @@
 <option value="draft"{#if $status == "draft"} selected{/if}>Taslak</option>
 <option value="published"{#if $status == "published"} selected{/if}>Yayında</option>
 </select></label>
+<label>Yayın zamanı (opsiyonel) <input type="datetime-local" name="publish_at" value="{$schedule}"></label>
+<p class="muted" style="margin:-4px 0 10px;font-size:13px">Durum "Yayında" + ileri bir tarih girilirse içerik o ana kadar gizli kalır (zamanlanır). Boş = hemen yayınla.</p>
 <button type="submit">Kaydet</button>
 <a class="muted" href="/admin/type/{$type.slug}" style="margin-left:12px">İptal</a>
 {#if $content_id}<a class="muted" href="/admin/type/{$type.slug}/history/{$content_id}" style="margin-left:12px">Sürüm geçmişi</a>{/if}

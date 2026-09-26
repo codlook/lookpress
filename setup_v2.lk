@@ -105,6 +105,13 @@ function ensure_column($c, $table, $col, $decl) {
 }
 // (commerce's orders/order_items/coupons columns are defined in its own schema hook)
 
+// Scheduled publishing: a nullable ISO datetime ("YYYY-MM-DD HH:MM:SS"). When set
+// and in the future, save_content holds published_rev at 0 (not publicly visible);
+// a per-request before_route sweep (activate_scheduled) flips it live once due. No
+// new read query needed — visibility stays gated by published_rev > 0.
+ensure_column($c, "content", "publish_at", "TEXT");
+db::exec($c, "CREATE INDEX IF NOT EXISTS idx_content_publish_at ON content(publish_at)", []);
+
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
 // /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently

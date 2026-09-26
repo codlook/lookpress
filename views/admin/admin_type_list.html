@@ -17,7 +17,7 @@
 {#each $items as $it}<tr>
 <td><a href="/admin/type/{$type.slug}/edit/{$it.id}">{$it.title}</a></td>
 <td class="muted">{$it.slug}</td>
-<td>{$it.status}</td>
+<td>{$it.status}{#if $it.is_scheduled} <span class="badge">zamanlanmış: {$it.sched_at}</span>{/if}</td>
 <td><a href="/preview/{$it.id}">önizle</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/duplicate/{$it.id}"><button class="btn-sm" type="submit">Çoğalt</button></form> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Silinsin mi?')"><button class="del" type="submit">Sil</button></form></td>
 </tr>{/each}
 </tbody>

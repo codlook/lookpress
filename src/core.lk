@@ -8,8 +8,35 @@ use template;
 use array;
 use html;
 use json;
+use date;
+use string;
 
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
+
+// ── scheduled publishing ──────────────────────────────────────────────────────
+// Parse an <input type="datetime-local"> value ("YYYY-MM-DDTHH:MM") into a stored
+// ISO datetime ("YYYY-MM-DD HH:MM:SS"). Returns "" on empty/invalid input so a
+// blank field simply means "publish now / not scheduled".
+function parse_schedule($raw) {
+    if ($raw == null) { return ""; }
+    $raw = string::trim($raw);
+    if ($raw == "") { return ""; }
+    try { return date::parse($raw, "Y-m-dTH:i"); } catch ($e) { return ""; }
+}
+// Convert a stored ISO datetime ("YYYY-MM-DD HH:MM:SS") back to the datetime-local
+// input value ("YYYY-MM-DDTHH:MM") for pre-filling the edit form. "" when unset.
+function schedule_input($iso) {
+    if ($iso == null) { return ""; }
+    if ($iso == "") { return ""; }
+    $s = string::substr($iso, 0, 16);
+    return string::replace($s, " ", "T");
+}
+// Flip any due scheduled items live in one indexed UPDATE (normally 0 rows). Called
+// once per request via before_route — visibility stays gated by published_rev > 0,
+// so no public read query changes. No external scheduler/cron needed.
+function activate_scheduled($c) {
+    db::exec($c, "UPDATE content SET published_rev = current_rev, publish_at = NULL WHERE status = 'published' AND published_rev = 0 AND current_rev > 0 AND publish_at IS NOT NULL AND publish_at <= ?", [date::now()]);
+}
 
 // ── settings (namespaced key-value, cached) ──────────────────────────────────
 // Namespaced + lazy-cached so it never becomes the wp_options bloat: the whole

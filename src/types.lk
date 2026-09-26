@@ -176,8 +176,20 @@ function save_content($c, $type, $id, $slug, $values, $status, $lang) {
     $rev_no = type::to_int($mx[0]["m"]) + 1;
     db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'admin edit')", [$id, $rev_no, $title, $body_md, $body_html, $fields_json, $ts]);
     $rid = db::last_id($c);
+    // Scheduled publishing: a future publish_at holds the item back (published_rev
+    // stays 0 → not publicly visible) until activate_scheduled flips it when due.
+    // Empty/past/invalid schedule = publish now. Draft never schedules.
+    $sched = parse_schedule(request::post("publish_at"));
     $prev = 0;
-    if ($status == "published") { $prev = $rid; }
-    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $id]);
+    $pub_at = null;
+    if ($status == "published") {
+        if ($sched != "" && $sched > date::now()) {
+            $prev = 0;          // scheduled — not live yet
+            $pub_at = $sched;
+        } else {
+            $prev = $rid;       // live now
+        }
+    }
+    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ?, publish_at = ? WHERE id = ?", [$rid, $prev, $pub_at, $id]);
     return $id;
 }
