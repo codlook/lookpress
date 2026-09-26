@@ -1,0 +1,18 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Kategoriler <span class="muted">({$count})</span></h2></div>
+{#if $count == 0}<p class="muted">Henüz kategori yok.</p>{/if}
+<div class="table-wrap"><table>
+<thead><tr><th>Ad</th><th>Slug</th><th>İşlem</th></tr></thead>
+<tbody>
+{#each $items as $it}<tr><td><b>{$it.name}</b></td><td><code>{$it.slug}</code></td><td><form method="post" action="/admin/categories/{$it.id}/delete" class="inline" onsubmit="return confirm('Kategori silinsin mi?')"><button class="del">Sil</button></form></td></tr>{/each}
+</tbody>
+</table></div>
+<h3>Yeni kategori</h3>
+<form method="post" action="/admin/categories/new" class="user-form">
+  <label>Ad <input name="name" required></label>
+  <label>Slug <input name="slug" placeholder="kucuk-harf-tire-rakam" required></label>
+  <button type="submit">Ekle</button>
+</form>
+<p class="muted" style="font-size:13px;margin-top:12px">Kategoriler ürün düzenleme ekranındaki <b>category</b> alanından ürünlere atanır.</p>
+{/block}

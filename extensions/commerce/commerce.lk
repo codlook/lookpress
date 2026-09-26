@@ -201,6 +201,31 @@ route("POST", "/admin/coupons/new", function() {
     }
     return response::redirect("/admin/coupons");
 });
+// ── admin: categories (domain model CRUD) ─────────────────────────────────────
+route("GET", "/admin/categories", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("products")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $cats = category_all($c);
+    return response::html(ext_admin_view("commerce", "admin_categories.html", ["items" => $cats, "count" => count($cats)]));
+});
+route("POST", "/admin/categories/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("products")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $name = string::trim(request::post("name"));
+    $slug = string::trim(request::post("slug"));
+    if ($name != "" && string::regex_match($slug, "^[a-z0-9-]+$")) {
+        if (count(db::query($c, "SELECT id FROM categories WHERE slug = ?", [$slug])) == 0) { category_create($c, $name, $slug); }
+    }
+    return response::redirect("/admin/categories");
+});
+route("POST", "/admin/categories/{id}/delete", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("products")) { return response::status(403, "Yetkiniz yok."); }
+    category_delete(conn(), type::to_int(request::param("id")));
+    return response::redirect("/admin/categories");
+});
 
 // ── extension-point overrides: weave commerce into the core UI ─────────────────
 // These redefine the core's empty defaults (src/hooks.lk). The core calls them by
@@ -257,16 +282,38 @@ function xp_home_sections($ctx) {
 function xp_hidden_types() { return ["product"]; }
 // commerce contributes its permissions to the RBAC catalog.
 function xp_permissions() {
-    return [["key" => "orders", "label" => "Siparişler"], ["key" => "coupons", "label" => "Kuponlar"]];
+    return [["key" => "products", "label" => "Ürünler & kategoriler"], ["key" => "orders", "label" => "Siparişler"], ["key" => "coupons", "label" => "Kuponlar"]];
 }
-// Admin sidebar: the "Ticaret" nav group (coupons gated to super users).
-function xp_admin_nav($ctx) {
-    $out = "<div class=\"grp\">Ticaret</div>"
-         . "<a href=\"/admin/type/product\" data-nav=\"/admin/type/product\"><span class=\"ic\">▦</span> Ürünler</a>"
-         . "<a href=\"/admin/orders\" data-nav=\"/admin/order\"><span class=\"ic\">▧</span> Siparişler</a>";
-    $super = false; if ($ctx != null) { try { $super = $ctx["super"]; } catch ($e) { $super = false; } }
-    if ($super) {
-        $out = $out . "<a href=\"/admin/coupons\" data-nav=\"/admin/coupons\"><span class=\"ic\">%</span> Kuponlar</a>";
+
+// ── categories: a DOMAIN MODEL (real table + thin helpers, no query-builder) ───
+function category_all($c) { return db::query($c, "SELECT id, name, slug FROM categories ORDER BY name", []); }
+function category_create($c, $name, $slug) { db::exec($c, "INSERT INTO categories (name, slug) VALUES (?, ?)", [$name, $slug]); }
+function category_delete($c, $id) { db::exec($c, "DELETE FROM categories WHERE id = ?", [$id]); }
+
+// Custom field type "category": a <select> of categories in the content editor.
+function xp_field_input($c, $f, $value) {
+    if ($f["type"] != "category") { return ""; }
+    $opts = "<option value=\"\">—</option>";
+    foreach (category_all($c) as $cat) {
+        $sel = ""; if ($cat["slug"] == $value) { $sel = " selected"; }
+        $opts = $opts . "<option value=\"" . $cat["slug"] . "\"" . $sel . ">" . html::escape($cat["name"]) . "</option>";
     }
-    return $out;
+    return "<label>" . $f["name"] . "<select name=\"" . $f["name"] . "\">" . $opts . "</select></label>";
+}
+// Admin sidebar: the "Ticaret" nav group — each item gated by its own permission,
+// so the group appears only for roles that can use part of it.
+function xp_admin_nav($ctx) {
+    $items = "";
+    if (can("products")) {
+        $items = $items . "<a href=\"/admin/type/product\" data-nav=\"/admin/type/product\"><span class=\"ic\">▦</span> Ürünler</a>"
+                        . "<a href=\"/admin/categories\" data-nav=\"/admin/categories\"><span class=\"ic\">◧</span> Kategoriler</a>";
+    }
+    if (can("orders")) {
+        $items = $items . "<a href=\"/admin/orders\" data-nav=\"/admin/order\"><span class=\"ic\">▧</span> Siparişler</a>";
+    }
+    if (can("coupons")) {
+        $items = $items . "<a href=\"/admin/coupons\" data-nav=\"/admin/coupons\"><span class=\"ic\">%</span> Kuponlar</a>";
+    }
+    if ($items == "") { return ""; }
+    return "<div class=\"grp\">Ticaret</div>" . $items;
 }

@@ -16,6 +16,7 @@ function xp_migrate($c) {
     db::exec($c, "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(200), total VARCHAR(40), status VARCHAR(20) DEFAULT 'received', created_at INTEGER DEFAULT 0, cust_name VARCHAR(120) DEFAULT '', address TEXT DEFAULT '', phone VARCHAR(40) DEFAULT '', coupon VARCHAR(40) DEFAULT '')", []);
     db::exec($c, "CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, slug VARCHAR(200), title VARCHAR(200), price VARCHAR(40), qty INTEGER DEFAULT 1)", []);
     db::exec($c, "CREATE TABLE IF NOT EXISTS coupons (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(40) UNIQUE, kind VARCHAR(10) DEFAULT 'percent', value VARCHAR(20) DEFAULT '0', active INTEGER DEFAULT 1)", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(120), slug VARCHAR(120) UNIQUE)", []);
 }
 
 // Demo seed (opt-in: LOOKPRESS_SEED=1) — the product type + fixtures the smoke suite asserts.
@@ -28,9 +29,15 @@ function xp_seed($c) {
                 ["name" => "title", "type" => "text",     "required" => true],
                 ["name" => "body",  "type" => "markdown", "required" => false],
                 ["name" => "price", "type" => "text",     "required" => true],
-                ["name" => "sku",   "type" => "text",     "required" => false],
-                ["name" => "image", "type" => "image",    "required" => false]
+                ["name" => "sku",      "type" => "text",     "required" => false],
+                ["name" => "image",    "type" => "image",    "required" => false],
+                ["name" => "category", "type" => "category", "required" => false]
             ])]);
+    }
+    $hcat = db::query($c, "SELECT id FROM categories LIMIT 1", []);
+    if (count($hcat) == 0) {
+        db::exec($c, "INSERT INTO categories (name, slug) VALUES ('Giyim', 'giyim')", []);
+        db::exec($c, "INSERT INTO categories (name, slug) VALUES ('Aksesuar', 'aksesuar')", []);
     }
     $have = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
     if (count($have) == 0) {

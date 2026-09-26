@@ -93,7 +93,9 @@ function field_input($c, $f, $value) {
         }
         return "<label>" . $name . " (" . $target . ")<select name=\"" . $name . "\">" . $opts . "</select></label>";
     }
-    // default: text
+    // extension-provided field type (commerce → "category")? else plain text.
+    $x = xp_field_input($c, $f, $value);
+    if ($x != "") { return $x; }
     return "<label>" . $name . "<input name=\"" . $name . "\" value=\"" . $v . "\"></label>";
 }
 

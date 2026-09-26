@@ -21,6 +21,11 @@ function xp_hidden_types() { return []; }
 // Permission keys an extension contributes to the RBAC catalog (commerce →
 // orders, coupons). Each item: ["key"=>..., "label"=>...]. Default: none.
 function xp_permissions() { return []; }
+// Custom field-type renderer for the content editor. The core's field_input calls
+// this for a field type it doesn't recognise; an extension may return the field's
+// full <label>…</label> HTML (commerce → a "category" <select>). Return "" to let
+// the core fall back to a plain text input.
+function xp_field_input($c, $f, $value) { return ""; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }
