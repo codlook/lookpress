@@ -1,0 +1,56 @@
+// extensions/commerce/schema.lk — commerce's schema + demo seed, as migrate/seed
+// hooks. Kept ROUTES-FREE so setup (CLI `lk`, no web context) can load it to run
+// migrations without pulling in the runtime route() registrations. commerce.lk uses
+// this file too, so the runtime also has the hooks registered (harmless there).
+// hook_add comes from src/hooks.lk, which the composition root (setup_v2.lk / app.lk)
+// loads before this file — extensions don't cross-include the core by relative path.
+use db;
+use json;
+use date;
+use array;
+use type;
+
+// Tables owned by commerce (idempotent — safe on every migrate run). Overrides the
+// core's no-op xp_migrate default; setup_v2.lk calls xp_migrate($c) after core tables.
+function xp_migrate($c) {
+    db::exec($c, "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(200), total VARCHAR(40), status VARCHAR(20) DEFAULT 'received', created_at INTEGER DEFAULT 0, cust_name VARCHAR(120) DEFAULT '', address TEXT DEFAULT '', phone VARCHAR(40) DEFAULT '', coupon VARCHAR(40) DEFAULT '')", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, slug VARCHAR(200), title VARCHAR(200), price VARCHAR(40), qty INTEGER DEFAULT 1)", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS coupons (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(40) UNIQUE, kind VARCHAR(10) DEFAULT 'percent', value VARCHAR(20) DEFAULT '0', active INTEGER DEFAULT 1)", []);
+}
+
+// Demo seed (opt-in: LOOKPRESS_SEED=1) — the product type + fixtures the smoke suite asserts.
+function xp_seed($c) {
+    if (env("LOOKPRESS_SEED", "0") != "1") { return; }
+    $ex = db::query($c, "SELECT id FROM content_types WHERE slug = 'product'", []);
+    if (count($ex) == 0) {
+        db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES ('product', 'Product', '/product/{slug}', ?)",
+            [json::encode([
+                ["name" => "title", "type" => "text",     "required" => true],
+                ["name" => "body",  "type" => "markdown", "required" => false],
+                ["name" => "price", "type" => "text",     "required" => true],
+                ["name" => "sku",   "type" => "text",     "required" => false],
+                ["name" => "image", "type" => "text",     "required" => false]
+            ])]);
+    }
+    $have = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
+    if (count($have) == 0) {
+        commerce_seed_product($c, "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""]);
+        commerce_seed_product($c, "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""]);
+        commerce_seed_product($c, "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => ""]);
+    }
+    $hc = db::query($c, "SELECT id FROM coupons LIMIT 1", []);
+    if (count($hc) == 0) {
+        db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES ('WELCOME10', 'percent', '10', 1)", []);
+    }
+}
+function commerce_seed_product($c, $slug, $lang, $title, $body, $fields) {
+    $ex = db::query($c, "SELECT id FROM content WHERE type = 'product' AND slug = ? AND lang = ?", [$slug, $lang]);
+    if (count($ex) > 0) { return 0; }
+    $ts = date::timestamp();
+    db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES ('product', ?, ?, 'published', ?, ?)", [$slug, $lang, $ts, $ts]);
+    $cid = db::last_id($c);
+    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, ?, 0, ?, 'demo seed')", [$cid, $title, $body, "<p>" . $body . "</p>", json::encode($fields), $ts]);
+    $rid = db::last_id($c);
+    db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $rid, $cid]);
+    return 1;
+}

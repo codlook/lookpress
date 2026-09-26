@@ -53,15 +53,34 @@ function view($tpl, $data) {
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
     return template::render(theme_tpl(active_theme(), $tpl), $data);
 }
-// Admin has its OWN UI, independent of the active site theme (views/admin/) — a
-// theme ships only public views, so the theme ecosystem stays light. Injects the
-// logged-in user + super flag so the shared shell can render nav.
-function admin_view($tpl, $data) {
+// Admin chrome data every admin page needs: the logged-in user, the super flag,
+// and extension-contributed sidebar nav (commerce etc. inject via the "admin.nav"
+// hook — the core names no extension).
+function admin_chrome($data) {
     session::start();
     $un = session::get("uname"); if ($un == null) { $un = ""; }
     $data["nav_user"] = $un;
     $data["nav_super"] = is_super();
-    return template::render("views/admin/" . $tpl, $data);
+    $data["ext_nav"] = xp_admin_nav(["super" => is_super()]);
+    return $data;
+}
+// Admin has its OWN UI, independent of the active site theme (views/admin/) — a
+// theme ships only public views, so the theme ecosystem stays light.
+function admin_view($tpl, $data) {
+    return template::render("views/admin/" . $tpl, admin_chrome($data));
+}
+
+// Render an EXTENSION-owned template (extensions/<ext>/views/<tpl>). Public variant
+// injects the site chrome (title/skin); admin variant injects the admin chrome. This
+// is how an extension ships its own pages without living in the core view folders.
+function ext_view($ext, $tpl, $data) {
+    $data["site_title"] = site_title();
+    $data["skin"] = active_skin();
+    if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
+    return template::render("extensions/" . $ext . "/views/" . $tpl, $data);
+}
+function ext_admin_view($ext, $tpl, $data) {
+    return template::render("extensions/" . $ext . "/views/" . $tpl, admin_chrome($data));
 }
 
 // ── SEO: per-page meta + Open Graph + JSON-LD (Product schema for priced items) ─

@@ -4,6 +4,8 @@
 use db;
 use "lib/migrate.lk";
 use "lib/markdown.lk";
+use "src/hooks.lk";                    // extension seam
+use "extensions/commerce/schema.lk";  // registers commerce migrate/seed hooks (routes-free)
 use json;
 use date;
 use type;
@@ -44,21 +46,6 @@ $migrations = [
         "url_pattern" => "string(120)",
         "fields_json" => "text"
     ]],
-    ["id" => "v2_0004_orders", "create_table" => "orders", "columns" => [
-        "id"         => "pk",
-        "email"      => "string(200)",
-        "total"      => "string(40)",
-        "status"     => "string(20) default=received",
-        "created_at" => "int default=0"
-    ]],
-    ["id" => "v2_0005_order_items", "create_table" => "order_items", "columns" => [
-        "id"       => "pk",
-        "order_id" => "int",
-        "slug"     => "string(200)",
-        "title"    => "string(200)",
-        "price"    => "string(40)",
-        "qty"      => "int default=1"
-    ]],
     ["id" => "v2_0006_users", "create_table" => "users", "columns" => [
         "id"            => "pk",
         "username"      => "string(80) unique",
@@ -77,16 +64,12 @@ $migrations = [
         "form_key"   => "string(80)",
         "data_json"  => "text",
         "created_at" => "int default=0"
-    ]],
-    ["id" => "v2_0009_coupons", "create_table" => "coupons", "columns" => [
-        "id"     => "pk",
-        "code"   => "string(40) unique",
-        "kind"   => "string(10) default=percent",
-        "value"  => "string(20) default=0",
-        "active" => "int default=1"
     ]]
 ];
 migrate_run($c, $migrations);
+// Commerce (orders / order_items / coupons) is an EXTENSION — it owns its schema.
+// The extension overrides xp_migrate (commerce/schema.lk); the core default is a no-op.
+xp_migrate($c);
 // Composite uniqueness: a slug is unique per (lang, type) — a page and a post may
 // share a slug (different URL namespaces). migrate has no composite-unique DSL, so
 // create it directly.
@@ -101,10 +84,7 @@ function ensure_column($c, $table, $col, $decl) {
     foreach ($info as $ci) { if ($ci["name"] == $col) { $found = true; } }
     if (!$found) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
 }
-ensure_column($c, "orders", "cust_name", "VARCHAR(120) DEFAULT ''");
-ensure_column($c, "orders", "address",   "TEXT DEFAULT ''");
-ensure_column($c, "orders", "phone",     "VARCHAR(40) DEFAULT ''");
-ensure_column($c, "orders", "coupon",    "VARCHAR(40) DEFAULT ''");
+// (commerce's orders/order_items/coupons columns are defined in its own schema hook)
 
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
@@ -155,28 +135,14 @@ function seed_demo_item($c, $type, $slug, $lang, $title, $body, $fields) {
     return 1;
 }
 if (env("LOOKPRESS_SEED", "0") == "1") {
-    // A commerce-capable demo needs a "product" content type (title/body/price/sku/image).
-    seed_type($c, "product", "Product", "/product/{slug}", [
-        ["name" => "title", "type" => "text",     "required" => true],
-        ["name" => "body",  "type" => "markdown", "required" => false],
-        ["name" => "price", "type" => "text",     "required" => true],
-        ["name" => "sku",   "type" => "text",     "required" => false],
-        ["name" => "image", "type" => "text",     "required" => false]
-    ]);
-    $have_prod = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
-    if (count($have_prod) == 0) {
-        $pf = ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""];
-        seed_demo_item($c, "product", "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", $pf);
-        seed_demo_item($c, "product", "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", $pf);
-        seed_demo_item($c, "product", "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => ""]);
-        seed_demo_item($c, "page",    "about",          "en", "About us", "LookPress is a pure-LOOK site + commerce platform.", []);
-        print("=== seeded demo content (products tr/en + en page) ===\n");
-    }
-    $hc = db::query($c, "SELECT id FROM coupons LIMIT 1", []);
-    if (count($hc) == 0) {
-        db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES ('WELCOME10', 'percent', '10', 1)", []);
-    }
+    // Core demo: a plain page. Commerce demo (product type + products + coupon) is
+    // seeded by the commerce extension's own seed hook below — the core seeds no shop.
+    seed_demo_item($c, "page", "about", "en", "About us", "LookPress is a pure-LOOK web platform.", []);
+    print("=== seeded core demo content (en page) ===\n");
 }
+// Extensions seed their own demo data (commerce overrides xp_seed → product type +
+// demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.
+xp_seed($c);
 
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {

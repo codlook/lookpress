@@ -137,11 +137,9 @@
    <div class="grp">İçerik</div>
    <a href="/admin/type/page" data-nav="/admin/type"><span class="ic">▦</span> İçerik tipleri</a>
    <a href="/admin/media" data-nav="/admin/media"><span class="ic">▣</span> Medya</a>
-   <div class="grp">Ticaret</div>
-   <a href="/admin/orders" data-nav="/admin/order"><span class="ic">▧</span> Siparişler</a>
    <a href="/admin/forms" data-nav="/admin/forms"><span class="ic">✉</span> Form gönderimleri</a>
-{#if $nav_super}   <a href="/admin/coupons" data-nav="/admin/coupons"><span class="ic">%</span> Kuponlar</a>
-   <div class="grp">Yönetim</div>
+{!$ext_nav}
+{#if $nav_super}   <div class="grp">Yönetim</div>
    <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
    <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
 {/if}  </nav>

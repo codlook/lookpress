@@ -38,24 +38,16 @@ route("POST", "/admin/login", function() {
 });
 route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
 
-// Admin dashboard: stats + recent orders + the type list (the engine's entry point).
+// Admin dashboard: core content stats + the type list. Extensions inject their own
+// stat tiles ("admin.dashboard.stats") and panels ("admin.dashboard.panels") — the
+// core dashboard knows nothing of orders/revenue (commerce adds those).
 route("GET", "/admin", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     session::start();
     $c = conn();
     $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
     $n_content  = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", [])[0]["n"]);
-    $n_products = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'product' AND published_rev > 0", [])[0]["n"]);
-    $n_orders   = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM orders", [])[0]["n"]);
-    $revenue    = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders", [])[0]["r"];
     $n_subs     = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM form_submissions", [])[0]["n"]);
-    $recent = db::query($c, "SELECT id, cust_name, total, status FROM orders ORDER BY id DESC LIMIT 5", []);
-    $recent_html = "";
-    foreach ($recent as $o) {
-        $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
-        $recent_html = $recent_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($cn) . "</td><td>" . html::escape("" . $o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
-    }
-    if ($recent_html == "") { $recent_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
     $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
     $types_html = "";
     foreach ($types as $t) {
@@ -63,9 +55,10 @@ route("GET", "/admin", function() {
     }
     return response::html(admin_view("admin_dashboard.html", [
         "uname" => $uname, "is_super" => is_super(),
-        "n_content" => $n_content, "n_products" => $n_products, "n_orders" => $n_orders,
-        "revenue" => "" . $revenue, "n_subs" => $n_subs,
-        "recent" => $recent_html, "types_html" => $types_html
+        "n_content" => $n_content, "n_subs" => $n_subs,
+        "ext_stats" => xp_dashboard_stats(null),
+        "ext_panels" => xp_dashboard_panels(null),
+        "types_html" => $types_html
     ]));
 });
 
@@ -299,85 +292,7 @@ route("GET", "/admin/forms", function() {
     return response::html(admin_view("admin_forms.html", ["rows" => $rows, "count" => count($subs)]));
 });
 
-// ── admin: coupons (super only) ──────────────────────────────────────────────
-route("GET", "/admin/coupons", function() {
-    if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!is_super()) { return response::status(403, "admin only"); }
-    $c = conn();
-    $rows = db::query($c, "SELECT code, kind, value, active FROM coupons ORDER BY id DESC", []);
-    $html = "";
-    foreach ($rows as $r) {
-        $act = "hayır"; if (type::to_int($r["active"]) == 1) { $act = "evet"; }
-        $html = $html . "<tr><td>" . html::escape($r["code"]) . "</td><td>" . html::escape($r["kind"]) . "</td><td>" . html::escape($r["value"]) . "</td><td>" . $act . "</td></tr>";
-    }
-    if ($html == "") { $html = "<tr><td colspan=\"4\" class=\"muted\">Kupon yok.</td></tr>"; }
-    return response::html(admin_view("admin_coupons.html", ["rows" => $html, "count" => count($rows)]));
-});
-route("POST", "/admin/coupons/new", function() {
-    if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!is_super()) { return response::status(403, "admin only"); }
-    $c = conn();
-    $code = string::trim(request::post("code"));
-    $kind = request::post("kind"); if ($kind != "fixed") { $kind = "percent"; }
-    $value = string::trim(request::post("value"));
-    if ($code != "") {
-        $ex = db::query($c, "SELECT id FROM coupons WHERE code = ?", [$code]);
-        if (count($ex) == 0) { db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES (?, ?, ?, 1)", [$code, $kind, $value]); }
-    }
-    return response::redirect("/admin/coupons");
-});
-
-// ── admin: orders ────────────────────────────────────────────────────────────
-route("GET", "/admin/orders", function() {
-    if (!is_admin()) { return response::redirect("/admin/login"); }
-    $c = conn();
-    $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
-    $rows_html = "";
-    foreach ($orders as $o) {
-        $mail = $o["email"];
-        if ($mail == "") { $mail = "—"; }
-        $rows_html = $rows_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($mail) . "</td><td>" . html::escape($o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
-    }
-    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
-    return response::html(admin_view("admin_orders.html", ["rows" => $rows_html, "count" => count($orders)]));
-});
-route("GET", "/admin/order/{id}", function() {
-    if (!is_admin()) { return response::redirect("/admin/login"); }
-    $c = conn();
-    $id = request::param("id");
-    $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
-    if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
-    $o = $orows[0];
-    $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
-    $items_html = "";
-    foreach ($items as $it) {
-        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
-    }
-    $mail = $o["email"];
-    if ($mail == "") { $mail = "—"; }
-    $statuses = cfg_order_statuses();
-    $sel = "";
-    foreach ($statuses as $st) {
-        $selattr = "";
-        if ($st == $o["status"]) { $selattr = " selected"; }
-        $sel = $sel . "<option value=\"" . $st . "\"" . $selattr . ">" . $st . "</option>";
-    }
-    $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
-    $addr = $o["address"]; if ($addr == null) { $addr = ""; } if ($addr == "") { $addr = "—"; }
-    $ph = $o["phone"]; if ($ph == null) { $ph = ""; } if ($ph == "") { $ph = "—"; }
-    return response::html(admin_view("admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
-});
-route("POST", "/admin/order/{id}/status", function() {
-    if (!is_admin()) { return response::redirect("/admin/login"); }
-    $c = conn();
-    $id = request::param("id");
-    $status = request::post("status");
-    $allowed = cfg_order_statuses();
-    if (array::contains($allowed, $status)) {
-        db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
-    }
-    return response::redirect("/admin/order/" . $id);
-});
+// Commerce admin (orders, coupons) lives in extensions/commerce — not the core.
 
 // ── admin: users (role 'admin' only — RBAC) ──────────────────────────────────
 route("GET", "/admin/users", function() {

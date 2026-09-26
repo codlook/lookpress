@@ -1,0 +1,23 @@
+// src/hooks.lk — extension points. The core exposes named seams as ordinary
+// functions with empty defaults; an extension loaded AFTER the core (see app.lk /
+// setup_v2.lk load order) redefines the ones it wants — LOOK functions are
+// last-definition-wins, so the override takes effect. The core calls these with
+// normal static calls (VM-safe), and names an extension point, never an extension.
+//
+// v1 note: one provider per extension point (last loaded wins). Aggregating several
+// extensions on one point (WP-style multi-listener) is a later enhancement; today
+// commerce is the only extension, so a single override per point is exactly right.
+
+// Public content page: HTML injected below the body, and extra <head> markup.
+function xp_content_after_body($ctx) { return ""; }
+function xp_content_head($ctx) { return ""; }
+// Homepage: extra showcase sections (commerce → featured products).
+function xp_home_sections($ctx) { return ""; }
+// Admin sidebar: extra nav items ($ctx.super = is the viewer a super admin).
+function xp_admin_nav($ctx) { return ""; }
+// Admin dashboard: extra stat tiles and panels.
+function xp_dashboard_stats($ctx) { return ""; }
+function xp_dashboard_panels($ctx) { return ""; }
+// Setup-time: create an extension's tables / seed its demo data ($c = db handle).
+function xp_migrate($c) { return; }
+function xp_seed($c) { return; }

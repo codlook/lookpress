@@ -3,18 +3,12 @@
 <div class="section-head"><h2>Panel</h2><span class="muted">Giriş: <b>{$uname}</b></span></div>
 <div class="stat-row">
   <div class="stat"><div class="stat-n">{$n_content}</div><div class="stat-l">Yayınlı içerik</div></div>
-  <div class="stat"><div class="stat-n">{$n_products}</div><div class="stat-l">Ürün</div></div>
-  <div class="stat"><div class="stat-n">{$n_orders}</div><div class="stat-l">Sipariş</div></div>
-  <div class="stat"><div class="stat-n">{$revenue} &#8378;</div><div class="stat-l">Ciro</div></div>
+  {!$ext_stats}
   <div class="stat"><div class="stat-n">{$n_subs}</div><div class="stat-l">Form gönderimi</div></div>
 </div>
 <p class="quicklinks"><a class="btn" href="/admin/types/new">+ Yeni tip</a></p>
 
-<h3>Son siparişler</h3>
-<div class="table-wrap"><table>
-<thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Durum</th></tr></thead>
-<tbody>{!$recent}</tbody>
-</table></div>
+{!$ext_panels}
 
 <h3>İçerik tipleri</h3>
 <ul class="pages">{!$types_html}</ul>

@@ -1,0 +1,20 @@
+{
+  "name": "commerce",
+  "version": "1.0.0",
+  "description": "Cart, checkout, orders and coupons for LookPress — the WooCommerce-equivalent, as an extension that touches no core file.",
+  "entry": "commerce.lk",
+  "provides": {
+    "routes": [
+      "GET  /cart", "POST /cart/add", "POST /cart/remove", "POST /cart/coupon",
+      "POST /checkout",
+      "GET  /admin/orders", "GET /admin/order/{id}", "POST /admin/order/{id}/status",
+      "GET  /admin/coupons", "POST /admin/coupons/new"
+    ],
+    "extension_points": [
+      "xp_content_after_body", "xp_content_head", "xp_home_sections",
+      "xp_admin_nav", "xp_dashboard_stats", "xp_dashboard_panels",
+      "xp_migrate", "xp_seed"
+    ],
+    "tables": ["orders", "order_items", "coupons"]
+  }
+}

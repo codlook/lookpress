@@ -1,0 +1,263 @@
+// extensions/commerce/commerce.lk — the commerce extension. Everything about carts,
+// checkout, orders and coupons lives here: storefront routes, admin routes, its own
+// schema + demo seed, and the hooks that weave it into the core UI (add-to-cart on a
+// product page, Product JSON-LD, dashboard stats/panels, admin nav). The core never
+// names commerce — it exposes generic seams (src/hooks.lk) and this extension fills them.
+//
+// Loaded once by app.lk (runtime) and by setup_v2.lk (migrate/seed). It relies only on
+// the core's public helpers (view/ext_view/admin gates/config/hooks) — never core internals.
+// hook_add / ext_view / core helpers come from files the composition root (app.lk)
+// loads before this one; commerce touches no core file by relative path.
+use db;
+use session;
+use string;
+use json;
+use html;
+use type;
+use array;
+use date;
+
+// ── cart + coupon helpers (session-backed) ───────────────────────────────────
+function cart_get() {
+    session::start();
+    $raw = session::get("cart");
+    if ($raw == null) { return []; }
+    if ($raw == "") { return []; }
+    $parsed = json::decode($raw);
+    if ($parsed == null) { return []; }
+    return $parsed;
+}
+function cart_save($cart) { session::start(); session::set("cart", json::encode($cart)); }
+function coupon_code() { session::start(); $x = session::get("coupon"); if ($x == null) { return ""; } return $x; }
+function coupon_row($c, $code) {
+    if ($code == "") { return null; }
+    $rows = db::query($c, "SELECT code, kind, value FROM coupons WHERE code = ? AND active = 1", [$code]);
+    if (count($rows) == 0) { return null; }
+    return $rows[0];
+}
+function coupon_discount($subtotal, $row) {
+    if ($row == null) { return 0.0; }
+    $v = type::to_float($row["value"]);
+    if ($row["kind"] == "percent") { return $subtotal * $v / 100.0; }
+    return $v;
+}
+
+// ── storefront routes ─────────────────────────────────────────────────────────
+route("POST", "/cart/coupon", function() {
+    session::start();
+    session::set("coupon", string::trim(request::post("code")));
+    return response::redirect("/cart");
+});
+route("POST", "/cart/add", function() {
+    $c = conn();
+    $slug = request::post("slug");
+    $rows = db::query($c, "SELECT r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
+    if (count($rows) == 0) { return response::redirect("/product"); }
+    $vals = json::decode($rows[0]["fields_json"]);
+    $price = "0";
+    if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = "0"; } }
+    if ($price == null) { $price = "0"; }
+    $cart = cart_get();
+    $new = []; $found = false;
+    foreach ($cart as $it) {
+        if ($it["slug"] == $slug) { $it["qty"] = $it["qty"] + 1; $found = true; }
+        $new = array::push($new, $it);
+    }
+    if (!$found) {
+        $new = array::push($new, ["slug" => $slug, "title" => $rows[0]["title"], "price" => $price, "qty" => 1]);
+    }
+    cart_save($new);
+    return response::redirect("/cart");
+});
+route("POST", "/cart/remove", function() {
+    $slug = request::post("slug");
+    $cart = cart_get();
+    $new = [];
+    foreach ($cart as $it) { if ($it["slug"] != $slug) { $new = array::push($new, $it); } }
+    cart_save($new);
+    return response::redirect("/cart");
+});
+route("GET", "/cart", function() {
+    $c = conn();
+    $cart = cart_get();
+    $rows_html = ""; $subtotal = 0.0;
+    foreach ($cart as $it) {
+        $line = type::to_float($it["price"]) * $it["qty"];
+        $subtotal = $subtotal + $line;
+        $rows_html = $rows_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td><td>" . $line . " &#8378;</td><td><form method=\"post\" action=\"/cart/remove\" class=\"inline\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($it["slug"]) . "\"><button class=\"del\">&times;</button></form></td></tr>";
+    }
+    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"5\" class=\"muted\">Sepetiniz boş.</td></tr>"; }
+    $code = coupon_code();
+    $crow = coupon_row($c, $code);
+    $disc = coupon_discount($subtotal, $crow);
+    if ($disc > $subtotal) { $disc = $subtotal; }
+    $total = $subtotal - $disc;
+    $disc_row = "";
+    if ($crow != null) { $disc_row = "<p class=\"muted\">Kupon <b>" . html::escape($code) . "</b>: -" . $disc . " &#8378;</p>"; }
+    return response::html(ext_view("commerce", "cart.html", ["rows" => $rows_html, "subtotal" => $subtotal, "disc_row" => $disc_row, "total" => $total, "count" => count($cart), "code" => html::escape($code)]));
+});
+route("POST", "/checkout", function() {
+    // Demo checkout: no payment yet (roadmap Phase A). Persists a real order + line
+    // items, clears the cart, confirms — the WooCommerce "order record" half.
+    $c = conn();
+    $cart = cart_get();
+    if (count($cart) == 0) { return response::redirect("/cart"); }
+    $email = request::post("email"); if ($email == null) { $email = ""; }
+    $cust_name = request::post("cust_name"); if ($cust_name == null) { $cust_name = ""; }
+    $address = request::post("address"); if ($address == null) { $address = ""; }
+    $phone = request::post("phone"); if ($phone == null) { $phone = ""; }
+    $subtotal = 0.0;
+    foreach ($cart as $it) { $subtotal = $subtotal + type::to_float($it["price"]) * $it["qty"]; }
+    $code = coupon_code();
+    $crow = coupon_row($c, $code);
+    $disc = coupon_discount($subtotal, $crow);
+    if ($disc > $subtotal) { $disc = $subtotal; }
+    $total = $subtotal - $disc;
+    $applied = ""; if ($crow != null) { $applied = $code; }
+    $ts = date::timestamp();
+    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts]);
+    $oid = db::last_id($c);
+    foreach ($cart as $it) {
+        db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty) VALUES (?, ?, ?, ?, ?)", [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"]]);
+    }
+    $n = count($cart);
+    cart_save([]);
+    session::start(); session::set("coupon", "");
+    return response::html(ext_view("commerce", "checkout.html", ["count" => $n, "order_id" => $oid, "total" => $total]));
+});
+
+// ── admin routes: orders + coupons ────────────────────────────────────────────
+route("GET", "/admin/orders", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
+    $rows_html = "";
+    foreach ($orders as $o) {
+        $mail = $o["email"];
+        if ($mail == "") { $mail = "—"; }
+        $rows_html = $rows_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($mail) . "</td><td>" . html::escape($o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    return response::html(ext_admin_view("commerce", "admin_orders.html", ["rows" => $rows_html, "count" => count($orders)]));
+});
+route("GET", "/admin/order/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
+    if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
+    $o = $orows[0];
+    $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
+    $items_html = "";
+    foreach ($items as $it) {
+        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
+    }
+    $mail = $o["email"];
+    if ($mail == "") { $mail = "—"; }
+    $sel = "";
+    foreach (cfg_order_statuses() as $st) {
+        $selattr = ""; if ($st == $o["status"]) { $selattr = " selected"; }
+        $sel = $sel . "<option value=\"" . $st . "\"" . $selattr . ">" . $st . "</option>";
+    }
+    $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+    $addr = $o["address"]; if ($addr == null) { $addr = ""; } if ($addr == "") { $addr = "—"; }
+    $ph = $o["phone"]; if ($ph == null) { $ph = ""; } if ($ph == "") { $ph = "—"; }
+    return response::html(ext_admin_view("commerce", "admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
+});
+route("POST", "/admin/order/{id}/status", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $id = request::param("id");
+    $status = request::post("status");
+    if (array::contains(cfg_order_statuses(), $status)) {
+        db::exec($c, "UPDATE orders SET status = ? WHERE id = ?", [$status, $id]);
+    }
+    return response::redirect("/admin/order/" . $id);
+});
+route("GET", "/admin/coupons", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT code, kind, value, active FROM coupons ORDER BY id DESC", []);
+    $html = "";
+    foreach ($rows as $r) {
+        $act = "hayır"; if (type::to_int($r["active"]) == 1) { $act = "evet"; }
+        $html = $html . "<tr><td>" . html::escape($r["code"]) . "</td><td>" . html::escape($r["kind"]) . "</td><td>" . html::escape($r["value"]) . "</td><td>" . $act . "</td></tr>";
+    }
+    if ($html == "") { $html = "<tr><td colspan=\"4\" class=\"muted\">Kupon yok.</td></tr>"; }
+    return response::html(ext_admin_view("commerce", "admin_coupons.html", ["rows" => $html, "count" => count($rows)]));
+});
+route("POST", "/admin/coupons/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $code = string::trim(request::post("code"));
+    $kind = request::post("kind"); if ($kind != "fixed") { $kind = "percent"; }
+    $value = string::trim(request::post("value"));
+    if ($code != "") {
+        $ex = db::query($c, "SELECT id FROM coupons WHERE code = ?", [$code]);
+        if (count($ex) == 0) { db::exec($c, "INSERT INTO coupons (code, kind, value, active) VALUES (?, ?, ?, 1)", [$code, $kind, $value]); }
+    }
+    return response::redirect("/admin/coupons");
+});
+
+// ── extension-point overrides: weave commerce into the core UI ─────────────────
+// These redefine the core's empty defaults (src/hooks.lk). The core calls them by
+// name (static call, VM-safe) and never mentions commerce.
+// A priced content item gets an add-to-cart button below its body.
+function xp_content_after_body($ctx) {
+    $vals = $ctx["vals"];
+    $price = ""; if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
+    if ($price == null || $price == "") { return ""; }
+    return "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($ctx["slug"]) . "\"><button>Sepete ekle</button></form>";
+}
+// A priced item emits Product/Offer JSON-LD in <head>.
+function xp_content_head($ctx) {
+    $vals = $ctx["vals"];
+    $price = ""; if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
+    if ($price == null || $price == "") { return ""; }
+    $ld = ["@context" => "https://schema.org", "@type" => "Product",
+           "name" => $ctx["title"], "description" => $ctx["desc"],
+           "offers" => ["@type" => "Offer", "price" => $price, "priceCurrency" => "TRY", "availability" => "https://schema.org/InStock"]];
+    return "<script type=\"application/ld+json\">" . json::encode($ld) . "</script>";
+}
+// Dashboard: product / order / revenue stat tiles.
+function xp_dashboard_stats($x) {
+    $c = conn();
+    $n_products = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = 'product' AND published_rev > 0", [])[0]["n"]);
+    $n_orders   = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM orders", [])[0]["n"]);
+    $revenue    = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders", [])[0]["r"];
+    return "<div class=\"stat\"><div class=\"stat-n\">" . $n_products . "</div><div class=\"stat-l\">Ürün</div></div>"
+         . "<div class=\"stat\"><div class=\"stat-n\">" . $n_orders . "</div><div class=\"stat-l\">Sipariş</div></div>"
+         . "<div class=\"stat\"><div class=\"stat-n\">" . $revenue . " &#8378;</div><div class=\"stat-l\">Ciro</div></div>";
+}
+// Dashboard: recent orders panel.
+function xp_dashboard_panels($x) {
+    $c = conn();
+    $recent = db::query($c, "SELECT id, cust_name, total, status FROM orders ORDER BY id DESC LIMIT 5", []);
+    $rh = "";
+    foreach ($recent as $o) {
+        $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
+        $rh = $rh . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($cn) . "</td><td>" . html::escape("" . $o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+    }
+    if ($rh == "") { $rh = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
+    return "<h3>Son siparişler</h3><div class=\"table-wrap\"><table><thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Durum</th></tr></thead><tbody>" . $rh . "</tbody></table></div>";
+}
+// Homepage showcase: a "Featured products" grid (uses the core's generic card builder).
+function xp_home_sections($ctx) {
+    $c = conn();
+    $lang = $ctx["lang"]; $pfx = $ctx["pfx"];
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", [$lang]);
+    if (count($rows) == 0) { return ""; }
+    return "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $rows) . "</div>";
+}
+// Admin sidebar: the "Ticaret" nav group (coupons gated to super users).
+function xp_admin_nav($ctx) {
+    $out = "<div class=\"grp\">Ticaret</div>"
+         . "<a href=\"/admin/orders\" data-nav=\"/admin/order\"><span class=\"ic\">▧</span> Siparişler</a>";
+    $super = false; if ($ctx != null) { try { $super = $ctx["super"]; } catch ($e) { $super = false; } }
+    if ($super) {
+        $out = $out . "<a href=\"/admin/coupons\" data-nav=\"/admin/coupons\"><span class=\"ic\">%</span> Kuponlar</a>";
+    }
+    return $out;
+}

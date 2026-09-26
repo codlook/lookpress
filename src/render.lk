@@ -67,28 +67,15 @@ function render_published($type, $slug, $lang) {
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
-    // Commerce signal: any type that declares a non-empty `price` gets an
-    // add-to-cart button (the cart is a dynamic island, session-backed).
     $vals = json::decode($rows[0]["fields_json"]);
-    $price = "";
-    if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
-    if ($price != null) {
-        if ($price != "") {
-            $extra = $extra . "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($slug) . "\"><button>Sepete ekle</button></form>";
-        }
-    }
-    // SEO: meta description from the body + Product JSON-LD when priced.
     $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155);
-    $jsonld = "";
-    if ($price != null) {
-        if ($price != "") {
-            $ld = ["@context" => "https://schema.org", "@type" => "Product",
-                   "name" => $rows[0]["title"], "description" => $desc,
-                   "offers" => ["@type" => "Offer", "price" => $price, "priceCurrency" => "TRY", "availability" => "https://schema.org/InStock"]];
-            $jsonld = json::encode($ld);
-        }
-    }
-    $head = seo_head($rows[0]["title"], $desc, "website", $jsonld) . hreflang_links($c, $type, $slug);
+    // Extension seam: listeners may add UI below the body (commerce → add-to-cart)
+    // and extra <head> markup (commerce → Product/Offer JSON-LD). The core names
+    // no extension and knows nothing of price/cart.
+    $ctx = ["type" => $type, "slug" => $slug, "lang" => $lang, "vals" => $vals,
+            "title" => $rows[0]["title"], "desc" => $desc, "body_html" => $rows[0]["body_html"]];
+    $extra = $extra . xp_content_after_body($ctx);
+    $head = seo_head($rows[0]["title"], $desc, "website", "") . xp_content_head($ctx) . hreflang_links($c, $type, $slug);
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra, "head_extra" => $head]));
 }
 
@@ -128,11 +115,9 @@ function render_listing($c, $type, $lang) {
 function home_render($lang) {
     $c = conn();
     $pfx = lang_prefix($lang);
-    $prod_rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", [$lang]);
-    $products_section = "";
-    if (count($prod_rows) > 0) {
-        $products_section = "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $prod_rows) . "</div>";
-    }
+    // The homepage showcase is an extension seam — commerce injects a "Featured
+    // products" grid. The core home knows only generic content (posts + tagline).
+    $products_section = xp_home_sections(["lang" => $lang, "pfx" => $pfx]);
     $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", [$lang]);
     $tagline = setting_get($c, "tagline", "Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.");
     return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline, "lang_prefix" => $pfx]));

@@ -3,12 +3,13 @@
 // module with one responsibility:
 //
 //   config/config.lk installed themes/skins, order statuses, upload types, branding
+//   src/hooks.lk     action/filter registry — the seam extensions plug into
 //   src/core.lk      framework: DB, cached settings, view rendering, SEO, auth gates
 //   src/types.lk     the type engine: field inputs, validation, versioned-core write
 //   src/render.lk    public presentation: pages, listings, home/blog, URL resolvers
-//   src/cart.lk      commerce helpers: cart + coupon maths
+//   extensions/*     self-contained features (commerce: cart/checkout/orders/coupons)
+//                    that register routes + hooks and touch NO core file
 //   routes/public.lk    public site routes (home, blog, media, search, feeds, forms)
-//   routes/commerce.lk  cart + checkout routes
 //   routes/admin.lk     /admin/* + JSON API + preview (auth-gated)
 //   routes/dispatch.lk  dynamic per-type catch-alls — MUST load LAST (first-match)
 //
@@ -41,15 +42,17 @@ if (env("ADMIN_PASSWORD", "") == "") {
 // ── configuration (constants the whole app agrees on) ────────────────────────
 use "config/config.lk";
 
-// ── domain modules (functions only; no routes) ───────────────────────────────
+// ── core seams + domain modules (functions only; no routes) ──────────────────
+use "src/hooks.lk";    // action/filter registry (the extension seam)
 use "src/core.lk";
 use "src/types.lk";
 use "src/render.lk";
-use "src/cart.lk";
 
-// ── route modules (thin controllers) — specific routes first … ───────────────
+// ── extensions (register their own routes + hooks; touch no core file) ────────
+use "extensions/commerce/commerce.lk";
+
+// ── core route modules (thin controllers) — specific routes first … ──────────
 use "routes/public.lk";
-use "routes/commerce.lk";
 use "routes/admin.lk";
 // … and the dynamic catch-all LAST (first-match: every specific route wins).
 use "routes/dispatch.lk";
