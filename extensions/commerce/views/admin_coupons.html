@@ -6,7 +6,7 @@
 <tbody>{!$rows}</tbody>
 </table>
 <h3>Yeni kupon</h3>
-<form method="post" action="/admin/coupons/new" class="user-form">
+<form method="post" action="/admin/coupons/new" class="user-form">{!$csrf}
   <label>Kod <input type="text" name="code" required></label>
   <label>Tür <select name="kind"><option value="percent">yüzde (%)</option><option value="fixed">sabit (₺)</option></select></label>
   <label>Değer <input type="text" name="value" placeholder="10" required></label>

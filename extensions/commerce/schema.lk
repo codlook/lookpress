@@ -27,11 +27,86 @@ function xp_migrate($c) {
     if (!$has_parent) {
         db::exec($c, "ALTER TABLE categories ADD COLUMN parent_id INTEGER DEFAULT 0", []);
     }
+    // order_items: varyant adı + sku (nullable). Eski kurulumlarda sütun yok → PRAGMA ile
+    // idempotent ekle; tablo ASLA düşürülmez/yeniden yaratılmaz.
+    commerce_ensure_col($c, "order_items", "variant_name", "VARCHAR(120)");
+    commerce_ensure_col($c, "order_items", "variant_sku", "VARCHAR(80)");
+}
+// SQLite'ta ADD COLUMN IF NOT EXISTS yok → PRAGMA table_info ile bak, yoksa ALTER.
+function commerce_ensure_col($c, $table, $col, $decl) {
+    $found = false;
+    foreach (db::query($c, "PRAGMA table_info(" . $table . ")", []) as $ci) {
+        if ($ci["name"] == $col) { $found = true; }
+    }
+    if (!$found) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
+}
+
+// ── modül tanımları (yapısal, seed bayrağından BAĞIMSIZ, idempotent) ──────────
+// "marka" içerik tipi: ürünün ilişki (relation) hedefi. config_json sütunu spine dilimiyle
+// geliyor; henüz yoksa (eski DB / sıralama) config'siz INSERT'e düşülür — try/catch + yeniden kontrol.
+function commerce_ensure_brand_type($c) {
+    $fields = json::encode([
+        ["name" => "title",       "label" => "Marka adı", "type" => "text",     "required" => true],
+        ["name" => "logo",        "label" => "Logo",      "type" => "image",    "required" => false],
+        ["name" => "website",     "label" => "Web sitesi","type" => "url",      "required" => false],
+        ["name" => "description", "label" => "Açıklama",  "type" => "textarea", "required" => false]
+    ]);
+    $config = json::encode(["group" => "ecommerce", "icon" => "🏷️", "plural" => "Markalar", "singular" => "Marka", "order" => 30]);
+    $ex = db::query($c, "SELECT id FROM content_types WHERE slug = 'marka'", []);
+    if (count($ex) == 0) {
+        try {
+            db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json, config_json) VALUES ('marka', 'Markalar', '/marka/{slug}', ?, ?)", [$fields, $config]);
+        } catch ($e) { $ex = []; }
+        // config_json sütunu yoksa yukarıdaki INSERT ya fırlatır ya da sessizce başarısız olur → yeniden bak.
+        $ex = db::query($c, "SELECT id FROM content_types WHERE slug = 'marka'", []);
+        if (count($ex) == 0) {
+            db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES ('marka', 'Markalar', '/marka/{slug}', ?)", [$fields]);
+        }
+        return;
+    }
+    // Tip var: config_json boşsa doldur (sütun yoksa sessizce geç).
+    try {
+        $row = db::query($c, "SELECT config_json FROM content_types WHERE slug = 'marka'", []);
+        $cur = $row[0]["config_json"];
+        if ($cur == null || $cur == "" || $cur == "null") {
+            db::exec($c, "UPDATE content_types SET config_json = ? WHERE slug = 'marka'", [$config]);
+        }
+    } catch ($e) { $cur = ""; }
+}
+// Ürün tipine marka/özellik/varyant alanlarını ekle — SADECE yoksa (mevcut alanlara ve
+// içeriğe dokunmaz). Ürün tipi hiç yoksa no-op.
+function commerce_ensure_product_fields($c) {
+    $ex = db::query($c, "SELECT fields_json FROM content_types WHERE slug = 'product'", []);
+    if (count($ex) == 0) { return; }
+    $defs = json::decode($ex[0]["fields_json"]);
+    if ($defs == null) { $defs = []; }
+    $have = array::new_assoc();
+    foreach ($defs as $f) { try { $have["" . $f["name"]] = true; } catch ($e) { $have = $have; } }
+    $changed = false;
+    if ($have["marka"] == null) {
+        $defs = array::push($defs, ["name" => "marka", "label" => "Marka", "type" => "relation", "to" => "marka", "required" => false]);
+        $changed = true;
+    }
+    if ($have["ozellikler"] == null) {
+        $defs = array::push($defs, ["name" => "ozellikler", "label" => "Özellikler", "type" => "attributes", "required" => false]);
+        $changed = true;
+    }
+    if ($have["varyantlar"] == null) {
+        $defs = array::push($defs, ["name" => "varyantlar", "label" => "Varyantlar", "type" => "variants", "required" => false]);
+        $changed = true;
+    }
+    if ($changed) { db::exec($c, "UPDATE content_types SET fields_json = ? WHERE slug = 'product'", [json::encode($defs)]); }
 }
 
 // Demo seed (opt-in: LOOKPRESS_SEED=1) — the product type + fixtures the smoke suite asserts.
 function xp_seed($c) {
-    if (env("LOOKPRESS_SEED", "0") != "1") { return; }
+    // Yapısal kısım seed bayrağından BAĞIMSIZ: marka modülü + ürün tipine yeni alanlar
+    // (ürün tipi yoksa alan ekleme no-op). Demo veri yalnız LOOKPRESS_SEED=1 ile.
+    commerce_ensure_brand_type($c);
+    if (env("LOOKPRESS_SEED", "0") == "1") { commerce_seed_demo($c); }
+    commerce_ensure_product_fields($c);
+}
+function commerce_seed_demo($c) {
     $ex = db::query($c, "SELECT id FROM content_types WHERE slug = 'product'", []);
     if (count($ex) == 0) {
         db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES ('product', 'Product', '/product/{slug}', ?)",
@@ -53,11 +128,21 @@ function xp_seed($c) {
         // Demo alt kategori: "Giyim > Tişört" — hiyerarşiyi gösterir.
         db::exec($c, "INSERT INTO categories (name, slug, parent_id) VALUES ('Tişört', 'tisort', ?)", [$giyim_id]);
     }
+    // Demo marka (tr) — ürünler "marka" ilişkisiyle buna bağlanır.
+    $brand_id = commerce_seed_content($c, "marka", "lookwear", "tr", "LookWear", "LookPress demo markası.", ["logo" => "", "website" => "https://codlook.com", "description" => "LookPress demo markası."]);
     $have = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
     if (count($have) == 0) {
-        commerce_seed_product($c, "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim"]);
-        commerce_seed_product($c, "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim"]);
-        commerce_seed_product($c, "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => "", "category" => "giyim"]);
+        // Özellikler: [{"k","v"}] listesi; varyantlar: [{"ad","sku","fiyat","stok"}] listesi (JSON string olarak saklanır).
+        // Not: kirmizi-tisort VARYANTSIZ kalır (smoke testi slug-only /cart/add yapar) — varyant demo'su mavi-kot'ta.
+        $attrs = json::encode([["k" => "Kumaş", "v" => "%100 pamuk"], ["k" => "Kesim", "v" => "Rahat"]]);
+        $variants = json::encode([
+            ["ad" => "30 Beden", "sku" => "JN-BLU-002-30", "fiyat" => "",       "stok" => "5"],
+            ["ad" => "32 Beden", "sku" => "JN-BLU-002-32", "fiyat" => "",       "stok" => "8"],
+            ["ad" => "34 Beden", "sku" => "JN-BLU-002-34", "fiyat" => "419.00", "stok" => "0"]
+        ]);
+        commerce_seed_product($c, "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim", "marka" => "" . $brand_id, "ozellikler" => $attrs, "varyantlar" => ""]);
+        commerce_seed_product($c, "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim", "marka" => "" . $brand_id, "ozellikler" => $attrs, "varyantlar" => ""]);
+        commerce_seed_product($c, "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => "", "category" => "giyim", "marka" => "" . $brand_id, "ozellikler" => "", "varyantlar" => $variants]);
     }
     $hc = db::query($c, "SELECT id FROM coupons LIMIT 1", []);
     if (count($hc) == 0) {
@@ -65,13 +150,18 @@ function xp_seed($c) {
     }
 }
 function commerce_seed_product($c, $slug, $lang, $title, $body, $fields) {
-    $ex = db::query($c, "SELECT id FROM content WHERE type = 'product' AND slug = ? AND lang = ?", [$slug, $lang]);
-    if (count($ex) > 0) { return 0; }
+    return commerce_seed_content($c, "product", $slug, $lang, $title, $body, $fields);
+}
+// Herhangi bir tipte yayınlanmış demo içerik (idempotent: slug+lang varsa MEVCUT id döner,
+// yoksa yaratır ve yeni id döner) — marka ilişkisi için id gerekir.
+function commerce_seed_content($c, $type, $slug, $lang, $title, $body, $fields) {
+    $ex = db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = ?", [$type, $slug, $lang]);
+    if (count($ex) > 0) { return type::to_int($ex[0]["id"]); }
     $ts = date::timestamp();
-    db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES ('product', ?, ?, 'published', ?, ?)", [$slug, $lang, $ts, $ts]);
+    db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, ?, 'published', ?, ?)", [$type, $slug, $lang, $ts, $ts]);
     $cid = db::last_id($c);
     db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, ?, 0, ?, 'demo seed')", [$cid, $title, $body, "<p>" . $body . "</p>", json::encode($fields), $ts]);
     $rid = db::last_id($c);
     db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $rid, $cid]);
-    return 1;
+    return type::to_int($cid);
 }

@@ -17,6 +17,99 @@ use type;
 use array;
 use date;
 
+// CSRF alanı: csrf_field() çekirdeğe başka bir dilimle geliyor; henüz tanımlı değilse
+// boş dize (tanımsız fonksiyon çağrısı yakalanabilir bir hata fırlatır — lk ile doğrulandı).
+function csrf_field_safe() { try { return csrf_field(); } catch ($e) { return ""; } }
+
+// ── ürün varyant / özellik / marka yardımcıları ───────────────────────────────
+// Bir map'ten string değer oku; anahtar yoksa/null ise varsayılan. (json::decode map'i
+// olmayan anahtarda null döner, throw etmez; liste-literal'de de aynı — ikisini de kapsar.)
+function cm_str($m, $k, $d) {
+    if ($m == null) { return $d; }
+    $v = null; try { $v = $m[$k]; } catch ($e) { $v = null; }
+    if ($v == null) { return $d; }
+    return "" . $v;
+}
+// POST alanı: yoksa "" (trim'li).
+function cm_post($k) { $v = request::post($k); if ($v == null) { return ""; } return string::trim($v); }
+// fields_json içindeki bir alanı JSON LİSTE olarak çöz; yoksa/bozuksa boş liste.
+function product_json_list($vals, $key) {
+    $raw = cm_str($vals, $key, "");
+    if ($raw == "") { return []; }
+    $lst = json::decode($raw);
+    if ($lst == null) { return []; }
+    // Sadece map satırları kabul et (bozuk/elle yazılmış JSON'da string satır gelebilir).
+    $out = [];
+    foreach ($lst as $row) {
+        $ok = true; try { $t = $row["__probe"]; } catch ($e) { $ok = false; }
+        if ($ok) { $out = array::push($out, $row); }
+    }
+    return $out;
+}
+// Varyant satırı şekli: {"ad":"S","sku":"TS-S","fiyat":"249.90","stok":"10"} (fiyat/stok boş = ürün fiyatı / sınırsız)
+function product_variants($vals) { return product_json_list($vals, "varyantlar"); }
+// Özellik satırı şekli: {"k":"Renk","v":"Kırmızı"}
+function product_attributes($vals) { return product_json_list($vals, "ozellikler"); }
+function variant_find($variants, $sku) {
+    if ($sku == "") { return null; }
+    foreach ($variants as $v) { if (cm_str($v, "sku", "") == $sku) { return $v; } }
+    return null;
+}
+// Sepet satırı = ürün slug + varyant sku ("" = varyantsız ürün; eski satırlarda anahtar yok → "").
+function cart_line_variant($it) { return cm_str($it, "variant", ""); }
+function cart_line_is($it, $slug, $sku) { return ($it["slug"] == $slug && cart_line_variant($it) == $sku); }
+// Yayınlanmış ürün satırları (TÜM diller — aynı slug aynı fiziksel ürün; stok düşümü hepsine uygulanır).
+function product_published_rows($c, $slug) {
+    return db::query($c, "SELECT c.id AS cid, c.published_rev AS rid, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
+}
+// Bir varyantın stoğu (stok tanımsız/boş → -1 = sınırsız).
+function variant_stock($variant) {
+    $stok = cm_str($variant, "stok", "");
+    if ($stok == "") { return -1; }
+    return type::to_int($stok);
+}
+// Sepet satırı için mevcut stok: varyantsız → -1 (sınırsız); varyant bulunamazsa 0.
+function cart_line_stock($c, $slug, $sku) {
+    if ($sku == "") { return -1; }
+    $rows = product_published_rows($c, $slug);
+    if (count($rows) == 0) { return 0; }
+    $v = variant_find(product_variants(json::decode($rows[0]["fields_json"])), $sku);
+    if ($v == null) { return 0; }
+    return variant_stock($v);
+}
+// Varyant stoğunu düş (stok boşsa sınırsız → dokunma). Yayınlanmış revizyonun fields_json'ı
+// yerinde güncellenir (stok = canlı veri, içerik sürümü değil). Tabloya ASLA yeni sütun/satır yok.
+function variant_stock_decrement($c, $slug, $sku, $qty) {
+    if ($sku == "") { return; }
+    foreach (product_published_rows($c, $slug) as $row) {
+        $vals = json::decode($row["fields_json"]);
+        if ($vals == null) { continue; }
+        $variants = product_variants($vals);
+        if (count($variants) == 0) { continue; }
+        $new = []; $changed = false;
+        foreach ($variants as $v) {
+            if (cm_str($v, "sku", "") == $sku && cm_str($v, "stok", "") != "") {
+                $n = type::to_int(cm_str($v, "stok", "0")) - $qty;
+                if ($n < 0) { $n = 0; }
+                $v["stok"] = "" . $n; $changed = true;
+            }
+            $new = array::push($new, $v);
+        }
+        if ($changed) {
+            $vals["varyantlar"] = json::encode($new);
+            db::exec($c, "UPDATE revisions SET fields_json = ? WHERE id = ?", [json::encode($vals), $row["rid"]]);
+        }
+    }
+}
+// Sepet uyarısı (tek seferlik, session'da): stok yok / varyant seçilmedi.
+function cart_msg_set($m) { session::start(); session::set("cart_msg", $m); }
+function cart_msg_take() {
+    session::start();
+    $m = session::get("cart_msg"); if ($m == null) { $m = ""; }
+    if ($m != "") { session::set("cart_msg", ""); }
+    return $m;
+}
+
 // ── cart + coupon helpers (session-backed) ───────────────────────────────────
 function cart_get() {
     session::start();
@@ -51,29 +144,47 @@ route("POST", "/cart/coupon", function() {
 route("POST", "/cart/add", function() {
     $c = conn();
     $slug = request::post("slug");
-    $rows = db::query($c, "SELECT r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
+    $sku = cm_post("variant");
+    $rows = product_published_rows($c, $slug);
     if (count($rows) == 0) { return response::redirect("/product"); }
     $vals = json::decode($rows[0]["fields_json"]);
     $price = "0";
     if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = "0"; } }
     if ($price == null) { $price = "0"; }
+    // Varyantlı ürün: geçerli bir sku şart; fiyat varyanttan (boşsa ürün fiyatı), ad satırda taşınır.
+    $variants = product_variants($vals);
+    $variant = null; $vname = "";
+    if (count($variants) > 0) {
+        $variant = variant_find($variants, $sku);
+        if ($variant == null) { cart_msg_set("Lütfen bir varyant seçin."); return response::redirect("/cart"); }
+        $vp = cm_str($variant, "fiyat", ""); if ($vp != "") { $price = $vp; }
+        $vname = cm_str($variant, "ad", $sku);
+    } else { $sku = ""; }
     $cart = cart_get();
+    // Stok: tanımlıysa sepetteki mevcut adet + 1 stoğu aşamaz (stok 0 → hemen red).
+    $have = 0;
+    foreach ($cart as $it) { if (cart_line_is($it, $slug, $sku)) { $have = type::to_int($it["qty"]); } }
+    if ($variant != null) {
+        $stock = variant_stock($variant);
+        if ($stock >= 0 && $stock <= $have) { cart_msg_set("Bu varyant için yeterli stok yok."); return response::redirect("/cart"); }
+    }
     $new = []; $found = false;
     foreach ($cart as $it) {
-        if ($it["slug"] == $slug) { $it["qty"] = $it["qty"] + 1; $found = true; }
+        if (cart_line_is($it, $slug, $sku)) { $it["qty"] = $it["qty"] + 1; $found = true; }
         $new = array::push($new, $it);
     }
     if (!$found) {
-        $new = array::push($new, ["slug" => $slug, "title" => $rows[0]["title"], "price" => $price, "qty" => 1]);
+        $new = array::push($new, ["slug" => $slug, "title" => $rows[0]["title"], "price" => $price, "qty" => 1, "variant" => $sku, "variant_name" => $vname]);
     }
     cart_save($new);
     return response::redirect("/cart");
 });
 route("POST", "/cart/remove", function() {
     $slug = request::post("slug");
+    $sku = cm_post("variant");
     $cart = cart_get();
     $new = [];
-    foreach ($cart as $it) { if ($it["slug"] != $slug) { $new = array::push($new, $it); } }
+    foreach ($cart as $it) { if (!cart_line_is($it, $slug, $sku)) { $new = array::push($new, $it); } }
     cart_save($new);
     return response::redirect("/cart");
 });
@@ -84,8 +195,11 @@ route("GET", "/cart", function() {
     foreach ($cart as $it) {
         $line = type::to_float($it["price"]) * $it["qty"];
         $subtotal = $subtotal + $line;
-        $items = array::push($items, ["title" => $it["title"], "price" => $it["price"], "qty" => $it["qty"], "line" => $line, "slug" => $it["slug"]]);
+        $vname = cm_str($it, "variant_name", "");
+        $items = array::push($items, ["title" => $it["title"], "price" => $it["price"], "qty" => $it["qty"], "line" => $line, "slug" => $it["slug"],
+                                      "variant" => cart_line_variant($it), "variant_name" => $vname, "has_variant" => ($vname != "")]);
     }
+    $msg = cart_msg_take();
     $code = coupon_code();
     $crow = coupon_row($c, $code);
     $disc = coupon_discount($subtotal, $crow);
@@ -93,15 +207,21 @@ route("GET", "/cart", function() {
     $total = $subtotal - $disc;
     return response::html(ext_view("commerce", "cart.html", [
         "items" => $items, "count" => count($cart), "has_items" => (count($cart) > 0),
-        "subtotal" => $subtotal, "has_disc" => ($crow != null), "disc" => $disc, "code" => $code, "total" => $total
+        "subtotal" => $subtotal, "has_disc" => ($crow != null), "disc" => $disc, "code" => $code, "total" => $total,
+        "msg" => $msg, "has_msg" => ($msg != ""), "csrf" => csrf_field_safe()
     ]));
 });
 route("POST", "/cart/update", function() {
+    $c = conn();
     $slug = request::post("slug");
+    $sku = cm_post("variant");
     $qty = type::to_int(request::post("qty"));
+    // Varyant stoğu tanımlıysa adet stokla sınırlanır (stok 0 → satır düşer).
+    $stock = cart_line_stock($c, $slug, $sku);
+    if ($stock >= 0 && $qty > $stock) { $qty = $stock; cart_msg_set("Adet mevcut stokla sınırlandı."); }
     $cart = cart_get(); $new = [];
     foreach ($cart as $it) {
-        if ($it["slug"] == $slug) {
+        if (cart_line_is($it, $slug, $sku)) {
             if ($qty > 0) { $it["qty"] = $qty; $new = array::push($new, $it); }
         } else { $new = array::push($new, $it); }
     }
@@ -114,6 +234,14 @@ route("POST", "/checkout", function() {
     $c = conn();
     $cart = cart_get();
     if (count($cart) == 0) { return response::redirect("/cart"); }
+    // Son stok kontrolü (sepete eklendikten sonra stok değişmiş olabilir).
+    foreach ($cart as $it) {
+        $stock = cart_line_stock($c, $it["slug"], cart_line_variant($it));
+        if ($stock >= 0 && type::to_int($it["qty"]) > $stock) {
+            cart_msg_set("Stok yetersiz: " . $it["title"] . " " . cm_str($it, "variant_name", ""));
+            return response::redirect("/cart");
+        }
+    }
     $email = request::post("email"); if ($email == null) { $email = ""; }
     $cust_name = request::post("cust_name"); if ($cust_name == null) { $cust_name = ""; }
     $address = request::post("address"); if ($address == null) { $address = ""; }
@@ -130,7 +258,9 @@ route("POST", "/checkout", function() {
     db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts]);
     $oid = db::last_id($c);
     foreach ($cart as $it) {
-        db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty) VALUES (?, ?, ?, ?, ?)", [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"]]);
+        db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty, variant_name, variant_sku) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"], cm_str($it, "variant_name", ""), cart_line_variant($it)]);
+        variant_stock_decrement($c, $it["slug"], cart_line_variant($it), type::to_int($it["qty"]));
     }
     $n = count($cart);
     cart_save([]);
@@ -159,10 +289,12 @@ route("GET", "/admin/order/{id}", function() {
     $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
     if (count($orows) == 0) { return response::status(404, view("notfound.html", [])); }
     $o = $orows[0];
-    $items = db::query($c, "SELECT title, price, qty FROM order_items WHERE order_id = ?", [$id]);
+    $items = db::query($c, "SELECT title, price, qty, variant_name FROM order_items WHERE order_id = ?", [$id]);
     $items_html = "";
     foreach ($items as $it) {
-        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
+        $vn = cm_str($it, "variant_name", "");
+        $vh = ""; if ($vn != "") { $vh = " <span class=\"muted\">(" . html::escape($vn) . ")</span>"; }
+        $items_html = $items_html . "<tr><td>" . html::escape($it["title"]) . $vh . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td></tr>";
     }
     $mail = $o["email"];
     if ($mail == "") { $mail = "—"; }
@@ -174,7 +306,7 @@ route("GET", "/admin/order/{id}", function() {
     $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; } if ($cn == "") { $cn = "—"; }
     $addr = $o["address"]; if ($addr == null) { $addr = ""; } if ($addr == "") { $addr = "—"; }
     $ph = $o["phone"]; if ($ph == null) { $ph = ""; } if ($ph == "") { $ph = "—"; }
-    return response::html(ext_admin_view("commerce", "admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel]));
+    return response::html(ext_admin_view("commerce", "admin_order.html", ["id" => $o["id"], "email" => $mail, "cust_name" => $cn, "address" => $addr, "phone" => $ph, "total" => $o["total"], "status" => $o["status"], "items" => $items_html, "status_options" => $sel, "csrf" => csrf_field_safe()]));
 });
 route("POST", "/admin/order/{id}/status", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -198,7 +330,7 @@ route("GET", "/admin/coupons", function() {
         $html = $html . "<tr><td>" . html::escape($r["code"]) . "</td><td>" . html::escape($r["kind"]) . "</td><td>" . html::escape($r["value"]) . "</td><td>" . $act . "</td></tr>";
     }
     if ($html == "") { $html = "<tr><td colspan=\"4\" class=\"muted\">Kupon yok.</td></tr>"; }
-    return response::html(ext_admin_view("commerce", "admin_coupons.html", ["rows" => $html, "count" => count($rows)]));
+    return response::html(ext_admin_view("commerce", "admin_coupons.html", ["rows" => $html, "count" => count($rows), "csrf" => csrf_field_safe()]));
 });
 route("POST", "/admin/coupons/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -229,7 +361,7 @@ route("GET", "/admin/categories", function() {
         $items = array::push($items, ["id" => $cat["id"], "name" => $cat["name"], "slug" => $cat["slug"], "pad" => $pad, "branch" => $branch]);
         $parent_opts = $parent_opts . "<option value=\"" . $cat["id"] . "\">" . category_indent($cat["depth"], "— ") . html::escape($cat["name"]) . "</option>";
     }
-    return response::html(ext_admin_view("commerce", "admin_categories.html", ["items" => $items, "count" => count($tree), "parent_options" => $parent_opts]));
+    return response::html(ext_admin_view("commerce", "admin_categories.html", ["items" => $items, "count" => count($tree), "parent_options" => $parent_opts, "csrf" => csrf_field_safe()]));
 });
 route("POST", "/admin/categories/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -267,12 +399,59 @@ route("POST", "/admin/categories/{id}/delete", function() {
 // ── extension-point overrides: weave commerce into the core UI ─────────────────
 // These redefine the core's empty defaults (src/hooks.lk). The core calls them by
 // name (static call, VM-safe) and never mentions commerce.
-// A priced content item gets an add-to-cart button below its body.
+// Marka: ürünün "marka" ilişki alanı (content id) → yayınlanmış marka başlığı + bağlantı.
+// Bağlantı markanın KENDİ dilinin önekiyle kurulur (tr ürün / en marka uyumsuzluğunda 404 olmasın).
+function product_brand_html($vals) {
+    $bid = type::to_int(cm_str($vals, "marka", ""));
+    if ($bid <= 0) { return ""; }
+    $c = conn();
+    $rows = db::query($c, "SELECT c.slug, c.lang, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.id = ? AND c.type = 'marka' AND c.published_rev > 0", [$bid]);
+    if (count($rows) == 0) { return ""; }
+    $href = lang_prefix($rows[0]["lang"]) . "/marka/" . $rows[0]["slug"];
+    return "<div class=\"cf-row cf-brand\"><span class=\"cf-label\">Marka</span> <a href=\"" . html::escape($href) . "\">" . html::escape($rows[0]["title"]) . "</a></div>";
+}
+// Özellikler tablosu ([{"k","v"}] → her hücre kaçışlı).
+function product_attributes_html($vals) {
+    $attrs = product_attributes($vals);
+    if (count($attrs) == 0) { return ""; }
+    $rows = "";
+    foreach ($attrs as $a) {
+        $k = cm_str($a, "k", ""); $v = cm_str($a, "v", "");
+        if ($k == "" && $v == "") { continue; }
+        $rows = $rows . "<tr><th>" . html::escape($k) . "</th><td>" . html::escape($v) . "</td></tr>";
+    }
+    if ($rows == "") { return ""; }
+    return "<div class=\"cf-attrs\"><h3>Özellikler</h3><table class=\"attrs\"><tbody>" . $rows . "</tbody></table></div>";
+}
+// Varyant seçimi: <select name="variant"> (etiket = ad, fiyat ürün fiyatından farklıysa eklenir; stok 0 → pasif).
+function product_variant_select_html($variants, $base_price) {
+    if (count($variants) == 0) { return ""; }
+    $opts = "";
+    foreach ($variants as $v) {
+        $sku = cm_str($v, "sku", ""); if ($sku == "") { continue; }
+        $label = cm_str($v, "ad", $sku);
+        $fp = cm_str($v, "fiyat", "");
+        if ($fp != "" && $fp != $base_price) { $label = $label . " — " . $fp . " ₺"; }
+        $dis = "";
+        if (variant_stock($v) == 0) { $label = $label . " (tükendi)"; $dis = " disabled"; }
+        $opts = $opts . "<option value=\"" . html::escape($sku) . "\"" . $dis . ">" . html::escape($label) . "</option>";
+    }
+    if ($opts == "") { return ""; }
+    return "<label class=\"variant-pick\">Seçenek <select name=\"variant\" required>" . $opts . "</select></label> ";
+}
+// A priced (or variant-priced) content item gets brand + attributes + an add-to-cart
+// form below its body. Items with no price, no variants, no brand, no attributes → "" (as before).
 function xp_content_after_body($ctx) {
     $vals = $ctx["vals"];
     $price = ""; if ($vals != null) { try { $price = $vals["price"]; } catch ($e) { $price = ""; } }
-    if ($price == null || $price == "") { return ""; }
-    return "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($ctx["slug"]) . "\"><button>Sepete ekle</button></form>";
+    if ($price == null) { $price = ""; }
+    $out = product_brand_html($vals) . product_attributes_html($vals);
+    $variants = product_variants($vals);
+    if ($price == "" && count($variants) == 0) { return $out; }
+    $sel = product_variant_select_html($variants, $price);
+    if (count($variants) > 0 && $sel == "") { return $out; }
+    return $out . "<form method=\"post\" action=\"/cart/add\" class=\"add-cart\">" . csrf_field_safe()
+         . "<input type=\"hidden\" name=\"slug\" value=\"" . html::escape($ctx["slug"]) . "\">" . $sel . "<button>Sepete ekle</button></form>";
 }
 // A priced item emits Product/Offer JSON-LD in <head>.
 function xp_content_head($ctx) {
@@ -429,8 +608,41 @@ function category_indent($depth, $unit) {
 }
 
 // Custom field type "category": a <select> of categories in the content editor.
+// Tekrarlı satır alanı (özellikler / varyantlar): satırlar gizli bir textarea'da JSON liste
+// olarak taşınır; küçük vanilla JS satır ekle/sil/senkron yapar. JS INLINE'dır (admin layout'a
+// dokunulmaz), window.cmRepInit ile bir kez tanımlanır, data-init ile yeniden-init korunur.
+function commerce_repeater_input($name, $value, $kind) {
+    $label = "Özellikler"; if ($kind == "variants") { $label = "Varyantlar"; }
+    $head = "<th>Özellik adı</th><th>Değer</th>";
+    if ($kind == "variants") { $head = "<th>Ad</th><th>SKU</th><th>Fiyat</th><th>Stok</th>"; }
+    $js = "<script>(function(){if(!window.cmRepInit){window.cmRepInit=function(){"
+        . "var cols={attributes:[['k','Özellik adı'],['v','Değer']],variants:[['ad','Ad'],['sku','SKU'],['fiyat','Fiyat'],['stok','Stok']]};"
+        . "var els=document.querySelectorAll('.cm-rep:not([data-init])');"
+        . "for(var i=0;i<els.length;i++){(function(el){el.setAttribute('data-init','1');"
+        . "var cs=cols[el.getAttribute('data-kind')]||[],ta=el.querySelector('.cm-rep-json'),tb=el.querySelector('tbody');"
+        . "var rows=[];try{var p=JSON.parse(ta.value||'[]');if(Array.isArray(p))rows=p;}catch(e){}"
+        . "function sync(){var out=[],trs=tb.querySelectorAll('tr');for(var r=0;r<trs.length;r++){var o={},ins=trs[r].querySelectorAll('input'),empty=true;"
+        . "for(var c=0;c<cs.length;c++){o[cs[c][0]]=ins[c]?ins[c].value:'';if(o[cs[c][0]]!=='')empty=false;}if(!empty)out.push(o);}ta.value=JSON.stringify(out);}"
+        . "function addRow(d){var tr=document.createElement('tr');for(var c=0;c<cs.length;c++){var td=document.createElement('td'),inp=document.createElement('input');"
+        . "inp.type='text';inp.placeholder=cs[c][1];inp.value=(d&&d[cs[c][0]]!=null)?String(d[cs[c][0]]):'';inp.addEventListener('input',sync);td.appendChild(inp);tr.appendChild(td);}"
+        . "var td2=document.createElement('td'),del=document.createElement('button');del.type='button';del.className='del';del.textContent='\\u00d7';"
+        . "del.addEventListener('click',function(){tr.parentNode.removeChild(tr);sync();});td2.appendChild(del);tr.appendChild(td2);tb.appendChild(tr);}"
+        . "for(var r=0;r<rows.length;r++)addRow(rows[r]);"
+        . "el.querySelector('.cm-rep-add').addEventListener('click',function(){addRow(null);sync();});"
+        . "})(els[i]);}};}window.cmRepInit();})();</script>";
+    return "<div class=\"field-block cm-rep\" data-kind=\"" . $kind . "\" data-field=\"" . $name . "\">"
+         . "<span class=\"fb-label\">" . $name . " <span class=\"muted\">(" . $label . ")</span></span>"
+         . "<div class=\"table-wrap\"><table class=\"cm-rep-t\"><thead><tr>" . $head . "<th></th></tr></thead><tbody></tbody></table></div>"
+         . "<button type=\"button\" class=\"btn cm-rep-add\">+ Satır ekle</button>"
+         . "<textarea name=\"" . $name . "\" class=\"cm-rep-json\" hidden>" . html::escape($value) . "</textarea>"
+         . "</div>" . $js;
+}
 function xp_field_input($c, $f, $value) {
-    if ($f["type"] != "category") { return ""; }
+    $t = $f["type"];
+    if ($value == null) { $value = ""; }
+    if ($t == "attributes") { return commerce_repeater_input($f["name"], $value, "attributes"); }
+    if ($t == "variants")   { return commerce_repeater_input($f["name"], $value, "variants"); }
+    if ($t != "category") { return ""; }
     // Ağacı derinliğe göre "— " öneğiyle girintili göster ki hiyerarşi seçim kutusunda okunsun.
     $opts = "<option value=\"\">—</option>";
     foreach (category_tree($c) as $cat) {

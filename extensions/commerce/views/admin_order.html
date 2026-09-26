@@ -7,7 +7,7 @@
   <div>{$email}</div>
   <div class="ship-addr">{$address}</div>
 </div>
-<form method="post" action="/admin/order/{$id}/status" class="status-form">
+<form method="post" action="/admin/order/{$id}/status" class="status-form">{!$csrf}
   <label>Durum
     <select name="status">{!$status_options}</select>
   </label>

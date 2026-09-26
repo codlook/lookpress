@@ -1,28 +1,29 @@
 {#extends "views/themes/default/layout"}
 {#block "content"}
 <h2>Sepet <span class="muted">({$count})</span></h2>
+{#if $has_msg}<p class="cart-msg muted"><b>{$msg}</b></p>{/if}
 {#if $count == 0}<p class="muted">Sepetiniz boş. <a href="/product">Mağazaya göz atın &rarr;</a></p>{/if}
 {#if $has_items}
 <table>
 <thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th><th>Tutar</th><th></th></tr></thead>
 <tbody>
 {#each $items as $it}<tr>
-<td>{$it.title}</td>
+<td>{$it.title}{#if $it.has_variant} <span class="muted">({$it.variant_name})</span>{/if}</td>
 <td>{$it.price} &#8378;</td>
-<td><form method="post" action="/cart/update" class="qty-form"><input type="hidden" name="slug" value="{$it.slug}"><input type="number" name="qty" value="{$it.qty}" min="0" class="qty-input"><button class="btn-sm">Güncelle</button></form></td>
+<td><form method="post" action="/cart/update" class="qty-form">{!$csrf}<input type="hidden" name="slug" value="{$it.slug}"><input type="hidden" name="variant" value="{$it.variant}"><input type="number" name="qty" value="{$it.qty}" min="0" class="qty-input"><button class="btn-sm">Güncelle</button></form></td>
 <td>{$it.line} &#8378;</td>
-<td><form method="post" action="/cart/remove" class="inline"><input type="hidden" name="slug" value="{$it.slug}"><button class="del">&times;</button></form></td>
+<td><form method="post" action="/cart/remove" class="inline">{!$csrf}<input type="hidden" name="slug" value="{$it.slug}"><input type="hidden" name="variant" value="{$it.variant}"><button class="del">&times;</button></form></td>
 </tr>{/each}
 </tbody>
 </table>
-<form method="post" action="/cart/coupon" class="coupon-form">
+<form method="post" action="/cart/coupon" class="coupon-form">{!$csrf}
   <input type="text" name="code" value="{$code}" placeholder="Kupon kodu (ör. WELCOME10)">
   <button>Uygula</button>
 </form>
 <p class="muted">Ara toplam: {$subtotal} &#8378;</p>
 {#if $has_disc}<p class="muted">Kupon <b>{$code}</b>: -{$disc} &#8378;</p>{/if}
 <p class="cart-total">Toplam: <b>{$total} &#8378;</b></p>
-<form method="post" action="/checkout" class="checkout-fields">
+<form method="post" action="/checkout" class="checkout-fields">{!$csrf}
   <input type="text" name="cust_name" placeholder="Ad Soyad" required>
   <input type="email" name="email" placeholder="E-posta" required>
   <input type="tel" name="phone" placeholder="Telefon">
