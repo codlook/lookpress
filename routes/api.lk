@@ -1,0 +1,55 @@
+// routes/api.lk — versioned read API (v1). Published content only (read-surface
+// invariant), no auth. Adds pagination, title search and category filter, plus a
+// single-item endpoint. The legacy bare-array /api/{type} stays as-is (routes/admin).
+//
+//   GET /api/v1/{type}?page=&limit=&q=&category=   → {data:[...], meta:{...}}
+//   GET /api/v1/{type}/{slug}                      → {data:{...}}  | 404
+use db;
+use json;
+use string;
+use array;
+use type;
+
+function api_json($payload) {
+    response::text(json::encode($payload));
+    response::header("Content-Type", "application/json");
+    return;
+}
+
+route("GET", "/api/v1/{type}", function() {
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
+    $per = type::to_int(request::get("limit") ?? "20"); if ($per < 1) { $per = 20; } if ($per > 100) { $per = 100; }
+    $page = type::to_int(request::get("page") ?? "1"); if ($page < 1) { $page = 1; }
+    $q = string::trim(request::get("q") ?? "");
+    $cat = request::get("category"); if ($cat == null) { $cat = ""; }
+    $where = "c.type = ? AND c.published_rev > 0"; $params = [$t["slug"]];
+    if ($q != "") { $where = $where . " AND r.title LIKE ?"; $params = array::push($params, "%" . $q . "%"); }
+    if ($cat != "") { $where = $where . " AND r.fields_json LIKE ?"; $params = array::push($params, "%\"category\":\"" . $cat . "\"%"); }
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content c JOIN revisions r ON r.id = c.published_rev WHERE " . $where, $params)[0]["n"]);
+    $pages = ($total + $per - 1) / $per; $pages = type::to_int($pages); if ($pages < 1) { $pages = 1; }
+    $offset = ($page - 1) * $per;
+    $qp = $params; $qp = array::push($qp, $per); $qp = array::push($qp, $offset);
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE " . $where . " ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", $qp);
+    $data = [];
+    foreach ($rows as $row) {
+        $item = json::decode($row["fields_json"]); if ($item == null) { $item = array::new_assoc(); }
+        $item = array::set($item, "slug", $row["slug"]);
+        $item = array::set($item, "title", $row["title"]);
+        $data = array::push($data, $item);
+    }
+    return api_json(["data" => $data, "meta" => ["page" => $page, "limit" => $per, "total" => $total, "pages" => $pages]]);
+});
+
+route("GET", "/api/v1/{type}/{slug}", function() {
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.published_rev > 0 LIMIT 1", [$t["slug"], request::param("slug")]);
+    if (count($rows) == 0) { return response::status(404, "{\"error\":\"not found\"}"); }
+    $item = json::decode($rows[0]["fields_json"]); if ($item == null) { $item = array::new_assoc(); }
+    $item = array::set($item, "slug", $rows[0]["slug"]);
+    $item = array::set($item, "title", $rows[0]["title"]);
+    return api_json(["data" => $item]);
+});

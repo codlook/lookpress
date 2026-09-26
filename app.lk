@@ -56,5 +56,6 @@ use "extensions/commerce/commerce.lk";
 // ── core route modules (thin controllers) — specific routes first … ──────────
 use "routes/public.lk";
 use "routes/admin.lk";
+use "routes/api.lk";
 // … and the dynamic catch-all LAST (first-match: every specific route wins).
 use "routes/dispatch.lk";
