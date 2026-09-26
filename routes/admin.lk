@@ -350,27 +350,63 @@ route("POST", "/admin/media/upload", function() {
     return;
 });
 
-// ── admin: form submissions ──────────────────────────────────────────────────
+// ── admin: form builder (definitions) + submissions ───────────────────────────
 route("GET", "/admin/forms", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("forms")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
-    $subs = db::query($c, "SELECT form_key, data_json FROM form_submissions ORDER BY id DESC LIMIT 200", []);
     $items = [];
-    foreach ($subs as $sub) {
-        $d = json::decode($sub["data_json"]);
-        $name = ""; $email = ""; $msg = "";
-        if ($d != null) {
-            try { $name = $d["name"]; } catch ($e) { $name = ""; }
-            try { $email = $d["email"]; } catch ($e) { $email = ""; }
-            try { $msg = $d["message"]; } catch ($e) { $msg = ""; }
-        }
-        if ($name == null) { $name = ""; }
-        if ($email == null) { $email = ""; }
-        if ($msg == null) { $msg = ""; }
-        $items = array::push($items, ["form_key" => $sub["form_key"], "name" => $name, "email" => $email, "message" => $msg]);
+    foreach (form_all($c) as $f) {
+        $fd = json::decode($f["fields_json"]); $nf = 0; if ($fd != null) { $nf = count($fd); }
+        $items = array::push($items, ["fkey" => $f["fkey"], "title" => $f["title"], "nfields" => $nf, "nsubs" => form_submission_count($c, $f["fkey"])]);
     }
-    return response::html(admin_view("admin_forms.html", ["items" => $items, "count" => count($subs)]));
+    // submission keys with no form definition (e.g. the styled /contact page)
+    $keys = db::query($c, "SELECT form_key, COUNT(*) AS n FROM form_submissions GROUP BY form_key", []);
+    $other = [];
+    foreach ($keys as $k) {
+        if (form_get($c, $k["form_key"]) == null) { $other = array::push($other, ["fkey" => $k["form_key"], "nsubs" => type::to_int($k["n"])]); }
+    }
+    return response::html(admin_view("admin_forms.html", ["items" => $items, "count" => count($items), "other" => $other, "has_other" => (count($other) > 0)]));
+});
+route("POST", "/admin/forms/new", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("forms")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $title = string::trim(request::post("title"));
+    $key = string::trim(request::post("fkey"));
+    $fj = request::post("fields");
+    if (!string::regex_match($key, "^[a-z][a-z0-9_-]*$")) { return response::status(400, "Geçersiz anahtar: küçük harf/rakam/-/_, harfle başlar."); }
+    if (json::decode($fj) == null) { return response::status(400, "fields geçerli JSON olmalı."); }
+    if ($title == "") { $title = $key; }
+    if (count(db::query($c, "SELECT id FROM forms WHERE fkey = ?", [$key])) == 0) {
+        db::exec($c, "INSERT INTO forms (fkey, title, fields_json, created_at) VALUES (?, ?, ?, ?)", [$key, $title, $fj, date::timestamp()]);
+    }
+    return response::redirect("/admin/forms");
+});
+route("GET", "/admin/form/{key}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("forms")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $key = request::param("key");
+    $def = form_get($c, $key);
+    $cols = [];
+    if ($def != null) { foreach ($def["fields"] as $f) { $cols = array::push($cols, $f["name"]); } }
+    $subs = db::query($c, "SELECT data_json FROM form_submissions WHERE form_key = ? ORDER BY id DESC LIMIT 500", [$key]);
+    if ($def == null && count($subs) > 0) {
+        $d0 = json::decode($subs[0]["data_json"]);
+        if ($d0 != null) { foreach (array::keys($d0) as $k) { $cols = array::push($cols, $k); } }
+    }
+    $rows = [];
+    foreach ($subs as $s) {
+        $d = json::decode($s["data_json"]); $vals = [];
+        foreach ($cols as $col) {
+            $v = ""; if ($d != null) { try { $v = $d[$col]; } catch ($e) { $v = ""; } } if ($v == null) { $v = ""; }
+            $vals = array::push($vals, $v);
+        }
+        $rows = array::push($rows, ["vals" => $vals]);
+    }
+    $title = $key; if ($def != null) { $title = $def["title"]; }
+    return response::html(admin_view("admin_form_subs.html", ["title" => $title, "fkey" => $key, "cols" => $cols, "rows" => $rows, "count" => count($subs)]));
 });
 
 // Commerce admin (orders, coupons) lives in extensions/commerce — not the core.

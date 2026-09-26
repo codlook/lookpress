@@ -88,17 +88,36 @@ route("GET", "/contact", function() {
     $sent = request::get("sent") ?? "";
     return response::html(view("contact.html", ["sent" => $sent]));
 });
+// Render a defined form (form builder) at /forms/{key}.
+route("GET", "/forms/{key}", function() {
+    $c = conn();
+    $def = form_get($c, request::param("key"));
+    if ($def == null) { return response::status(404, view("notfound.html", [])); }
+    $sent = request::get("sent") ?? "";
+    return response::html(view("form.html", ["form_title" => $def["title"], "fkey" => $def["fkey"], "fields" => form_field_views($def["fields"]), "sent" => ($sent == "1"), "page_title" => $def["title"]]));
+});
 route("POST", "/forms/{key}", function() {
     $c = conn();
     $key = request::param("key");
     // Honeypot: a hidden "website" field bots fill and humans never see. If set,
     // silently accept-and-drop (don't tell the bot it failed).
     $hp = request::post("website");
-    if ($hp != null) { if ($hp != "") { return response::redirect("/contact?sent=1"); } }
+    if ($hp != null) { if ($hp != "") { return response::redirect("/forms/" . $key . "?sent=1"); } }
+    $def = form_get($c, $key);
+    if ($def != null) {
+        // generic: store every defined field's value
+        $data = array::new_assoc();
+        foreach ($def["fields"] as $f) {
+            $val = request::post($f["name"]); if ($val == null) { $val = ""; }
+            $data = array::set($data, $f["name"], $val);
+        }
+        db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);
+        return response::redirect("/forms/" . $key . "?sent=1");
+    }
+    // legacy fallback (the styled /contact page posts here with no form definition)
     $name = request::post("name"); if ($name == null) { $name = ""; }
     $email = request::post("email"); if ($email == null) { $email = ""; }
     $message = request::post("message"); if ($message == null) { $message = ""; }
-    $data = ["name" => $name, "email" => $email, "message" => $message];
-    db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);
+    db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode(["name" => $name, "email" => $email, "message" => $message]), date::timestamp()]);
     return response::redirect("/contact?sent=1");
 });

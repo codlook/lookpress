@@ -71,6 +71,13 @@ $migrations = [
         "label"     => "string(80)",
         "perms"     => "text",
         "is_system" => "int default=0"
+    ]],
+    ["id" => "v2_0011_forms", "create_table" => "forms", "columns" => [
+        "id"          => "pk",
+        "fkey"        => "string(80) unique",
+        "title"       => "string(120)",
+        "fields_json" => "text",
+        "created_at"  => "int default=0"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -163,7 +170,16 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
     seed_type($c, "haber",  "Haberler",  "/haber/{slug}",  $common);
     seed_type($c, "duyuru", "Duyurular", "/duyuru/{slug}", $common);
     seed_type($c, "ekip",   "Ekipler",   "/ekip/{slug}",   $common);
-    print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) ===\n");
+    // demo form (form builder) — visible at /forms/basvuru
+    if (count(db::query($c, "SELECT id FROM forms WHERE fkey = 'basvuru'", [])) == 0) {
+        db::exec($c, "INSERT INTO forms (fkey, title, fields_json, created_at) VALUES ('basvuru', 'İş Başvurusu', ?, ?)", [json::encode([
+            ["name" => "ad",      "label" => "Ad Soyad", "type" => "text",     "required" => true],
+            ["name" => "email",   "label" => "E-posta",  "type" => "email",    "required" => true],
+            ["name" => "telefon", "label" => "Telefon",  "type" => "tel",      "required" => false],
+            ["name" => "mesaj",   "label" => "Mesaj",    "type" => "textarea", "required" => false]
+        ]), date::timestamp()]);
+    }
+    print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) + demo form (basvuru) ===\n");
 }
 // Extensions seed their own demo data (commerce overrides xp_seed → product type +
 // demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.

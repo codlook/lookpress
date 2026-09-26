@@ -1,0 +1,43 @@
+// src/forms.lk — the form builder. Forms are a DOMAIN MODEL (forms table: fkey,
+// title, fields_json) with thin helpers. A defined form renders itself at
+// /forms/{key} (generic field loop) and stores submissions generically into
+// form_submissions.data_json. No per-form code.
+use db;
+use json;
+use array;
+use type;
+
+// Thin helpers (no query-builder).
+function form_get($c, $key) {
+    $rows = db::query($c, "SELECT id, fkey, title, fields_json FROM forms WHERE fkey = ?", [$key]);
+    if (count($rows) == 0) { return null; }
+    $f = $rows[0];
+    $f["fields"] = json::decode($f["fields_json"]);
+    if ($f["fields"] == null) { $f["fields"] = []; }
+    return $f;
+}
+function form_all($c) { return db::query($c, "SELECT id, fkey, title, fields_json FROM forms ORDER BY title", []); }
+function form_submission_count($c, $key) {
+    return type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM form_submissions WHERE form_key = ?", [$key])[0]["n"]);
+}
+
+// Field DATA for the public form template (render flags per type — the template
+// draws the markup, logic stays here).
+function form_field_views($fields) {
+    $out = [];
+    foreach ($fields as $f) {
+        $t = "text"; try { $t = $f["type"]; } catch ($e) { $t = "text"; }
+        if ($t == null || $t == "") { $t = "text"; }
+        $req = false; try { $req = $f["required"]; } catch ($e) { $req = false; }
+        $label = $f["name"]; try { $label = $f["label"]; } catch ($e) { $label = $f["name"]; }
+        if ($label == null || $label == "") { $label = $f["name"]; }
+        $itype = "text";
+        if ($t == "email") { $itype = "email"; }
+        if ($t == "tel") { $itype = "tel"; }
+        $out = array::push($out, [
+            "name" => $f["name"], "label" => $label, "required" => $req,
+            "is_textarea" => ($t == "textarea"), "is_input" => ($t != "textarea"), "input_type" => $itype
+        ]);
+    }
+    return $out;
+}

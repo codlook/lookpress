@@ -1,0 +1,13 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<h2>{$form_title}</h2>
+{#if $sent}<div class="sent-ok">Gönderiminiz alındı, teşekkürler.</div>{/if}
+<form method="post" action="/forms/{$fkey}" class="contact-form">
+<input type="text" name="website" class="hp" tabindex="-1" autocomplete="off">
+{#each $fields as $f}<label>{$f.label}{#if $f.required} *{/if}
+{#if $f.is_input}<input type="{$f.input_type}" name="{$f.name}"{#if $f.required} required{/if}>{/if}{#if $f.is_textarea}<textarea name="{$f.name}" rows="4"{#if $f.required} required{/if}></textarea>{/if}
+</label>
+{/each}
+<button type="submit">Gönder</button>
+</form>
+{/block}

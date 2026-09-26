@@ -1,11 +1,32 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>Form gönderimleri <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
-{#if $count == 0}<p class="muted">Henüz gönderim yok.</p>{/if}
+<div class="section-head"><h2>Formlar <span class="muted">({$count})</span></h2></div>
+{#if $count == 0}<p class="muted">Henüz tanımlı form yok. Aşağıdan oluşturun.</p>{/if}
 <div class="table-wrap"><table>
-<thead><tr><th>Form</th><th>Ad</th><th>E-posta</th><th>Mesaj</th></tr></thead>
+<thead><tr><th>Form</th><th>Anahtar</th><th>Alan</th><th>Gönderim</th><th></th></tr></thead>
 <tbody>
-{#each $items as $it}<tr><td>{$it.form_key}</td><td>{$it.name}</td><td>{$it.email}</td><td>{$it.message}</td></tr>{/each}
+{#each $items as $f}<tr><td><b>{$f.title}</b></td><td><code>{$f.fkey}</code> &middot; <a href="/forms/{$f.fkey}" target="_blank">/forms/{$f.fkey}</a></td><td>{$f.nfields}</td><td>{$f.nsubs}</td><td><a href="/admin/form/{$f.fkey}">Gönderimler</a></td></tr>{/each}
 </tbody>
 </table></div>
+
+{#if $has_other}<h3>Tanımsız gönderimler</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Anahtar</th><th>Gönderim</th><th></th></tr></thead>
+<tbody>
+{#each $other as $o}<tr><td><code>{$o.fkey}</code></td><td>{$o.nsubs}</td><td><a href="/admin/form/{$o.fkey}">Gönderimler</a></td></tr>{/each}
+</tbody>
+</table></div>{/if}
+
+<h3>Yeni form</h3>
+<form method="post" action="/admin/forms/new" class="user-form">
+  <label>Başlık <input name="title" required></label>
+  <label>Anahtar (slug) <input name="fkey" placeholder="ör. iletisim" required></label>
+  <label>Alanlar (JSON) <textarea name="fields" rows="8">[
+  {"name":"ad","label":"Ad Soyad","type":"text","required":true},
+  {"name":"email","label":"E-posta","type":"email","required":true},
+  {"name":"mesaj","label":"Mesaj","type":"textarea"}
+]</textarea></label>
+  <button type="submit">Form oluştur</button>
+</form>
+<p class="muted" style="font-size:13px;margin-top:10px">Alan tipleri: <code>text · email · tel · textarea</code>. Form <code>/forms/&lt;anahtar&gt;</code> adresinde yayımlanır (honeypot spam korumalı).</p>
 {/block}

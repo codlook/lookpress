@@ -1,0 +1,11 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>{$title} — Gönderimler <span class="muted">({$count})</span></h2><a class="more" href="/admin/forms">&larr; Formlar</a></div>
+{#if $count == 0}<p class="muted">Henüz gönderim yok.</p>{/if}
+<div class="table-wrap"><table>
+<thead><tr>{#each $cols as $col}<th>{$col}</th>{/each}</tr></thead>
+<tbody>
+{#each $rows as $r}<tr>{#each $r.vals as $v}<td>{$v}</td>{/each}</tr>{/each}
+</tbody>
+</table></div>
+{/block}

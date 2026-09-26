@@ -48,6 +48,7 @@ use "src/core.lk";
 use "src/rbac.lk";     // role-based access control (can())
 use "src/types.lk";
 use "src/render.lk";
+use "src/forms.lk";    // form builder (defined forms + submissions)
 
 // ── extensions (register their own routes + hooks; touch no core file) ────────
 use "extensions/commerce/commerce.lk";
