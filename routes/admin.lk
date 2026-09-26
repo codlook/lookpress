@@ -530,6 +530,22 @@ route("POST", "/admin/roles/{id}/delete", function() {
     return response::redirect("/admin/roles");
 });
 
+// ── admin: themes (install list / preview / activate) ─────────────────────────
+route("GET", "/admin/themes", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    return response::html(admin_view("admin_themes.html", ["themes" => themes_list($c)]));
+});
+route("POST", "/admin/themes/activate", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $slug = request::post("theme");
+    if (array::contains(cfg_themes(), $slug)) { setting_set($c, "theme", $slug); settings_bust(); }
+    return response::redirect("/admin/themes");
+});
+
 // ── admin: settings (role 'admin' only) ──────────────────────────────────────
 route("GET", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }

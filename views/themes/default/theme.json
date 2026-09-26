@@ -1,0 +1,6 @@
+{
+  "name": "Default",
+  "version": "1.0.0",
+  "description": "LookPress'in yerleşik teması — blog, mağaza ve kurumsal site için nötr, temiz bir tasarım.",
+  "skins": ["default", "ocean", "sunset", "dark"]
+}

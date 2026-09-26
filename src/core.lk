@@ -7,6 +7,7 @@ use file;
 use template;
 use array;
 use html;
+use json;
 
 function conn() { return db::connect(env("DB_DSN", "sqlite://cms.db")); }
 
@@ -45,13 +46,36 @@ function theme_tpl($theme, $tpl) {
     if (file::exists($p)) { return $p; }
     return "views/themes/default/" . $tpl;
 }
+// Installed themes (explicit list, philosophy: nothing hidden) + their manifest
+// metadata (theme.json), with the active one flagged. Feeds the Themes admin.
+function themes_list($c) {
+    $active = active_theme();
+    $out = [];
+    foreach (cfg_themes() as $slug) {
+        $label = $slug; $desc = "";
+        $mp = "views/themes/" . $slug . "/theme.json";
+        if (file::exists($mp)) {
+            $m = json::decode(file::read($mp));
+            if ($m != null) {
+                try { $label = $m["name"]; } catch ($e) { $label = $slug; }
+                try { $desc = $m["description"]; } catch ($e) { $desc = ""; }
+            }
+        }
+        $out = array::push($out, ["slug" => $slug, "label" => $label, "desc" => $desc, "active" => ($slug == $active), "can_activate" => ($slug != $active)]);
+    }
+    return $out;
+}
 // Inject site title + skin into every PUBLIC view; default head_extra (SEO); render
-// from the active theme with a per-template fallback to default.
+// from the active theme with a per-template fallback to default. Admins may preview
+// another installed theme with ?_theme=<slug> (no activation, per-request only).
 function view($tpl, $data) {
+    $theme = active_theme();
+    $pv = request::get("_theme");
+    if ($pv != null && $pv != "" && is_admin() && array::contains(cfg_themes(), $pv)) { $theme = $pv; }
     $data["site_title"] = site_title();
     $data["skin"] = active_skin();
     if (!array::contains(array::keys($data), "head_extra")) { $data["head_extra"] = ""; }
-    return template::render(theme_tpl(active_theme(), $tpl), $data);
+    return template::render(theme_tpl($theme, $tpl), $data);
 }
 // Admin chrome data every admin page needs: the logged-in user, the super flag,
 // and extension-contributed sidebar nav (commerce etc. inject via the "admin.nav"

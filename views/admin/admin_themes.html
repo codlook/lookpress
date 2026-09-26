@@ -1,0 +1,15 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Temalar</h2></div>
+<p class="muted" style="font-size:13px;margin:0 0 14px">Tema yalnızca sunumu değiştirir — içerik, ürünler ve ayarlar aynı kalır. Bir temayı önizleyip etkinleştirebilirsiniz.</p>
+<div class="theme-grid">
+{#each $themes as $t}<div class="theme-card{#if $t.active} is-active{/if}">
+  <div class="theme-head"><span class="theme-name">{$t.label}</span>{#if $t.active} <span class="badge">aktif</span>{/if}</div>
+  <p class="theme-desc muted">{$t.desc}</p>
+  <div class="theme-actions">
+    <a class="btn-ghost" href="/?_theme={$t.slug}" target="_blank">Önizle</a>
+    {#if $t.can_activate}<form method="post" action="/admin/themes/activate" class="inline"><input type="hidden" name="theme" value="{$t.slug}"><button class="btn">Kullan</button></form>{/if}
+  </div>
+</div>{/each}
+</div>
+{/block}

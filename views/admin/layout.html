@@ -172,6 +172,17 @@
  .list-filter select{width:auto;margin-top:0}
  .pager{display:flex;gap:16px;align-items:center;margin-top:16px}
  .pager a{text-decoration:none}
+
+ /* ---- themes grid ---- */
+ .theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:6px}
+ .theme-card{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel);box-shadow:var(--shadow);display:flex;flex-direction:column}
+ .theme-card.is-active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+ .theme-head{display:flex;align-items:center;gap:8px}
+ .theme-name{font-weight:600;font-size:15px}
+ .theme-desc{font-size:13px;margin:8px 0 14px;flex:1}
+ .theme-actions{display:flex;gap:8px;align-items:center}
+ .btn-ghost{display:inline-block;padding:8px 14px;border:1px solid var(--line);border-radius:8px;text-decoration:none;font-size:14px;color:var(--fg)}
+ .btn-ghost:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
 </style></head>
 <body>
 <div class="layout">
@@ -188,7 +199,8 @@
 {#if $nav_manage}   <div class="grp">Yönetim</div>
 {#if $can_users}   <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
 {/if}{#if $can_roles}   <a href="/admin/roles" data-nav="/admin/roles"><span class="ic">◈</span> Roller &amp; Yetkiler</a>
-{/if}{#if $can_settings}   <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
+{/if}{#if $can_settings}   <a href="/admin/themes" data-nav="/admin/themes"><span class="ic">◪</span> Temalar</a>
+   <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
 {/if}{/if}  </nav>
   <div class="sfoot">
    <div class="who">Giriş: <b>{$nav_user}</b></div>
