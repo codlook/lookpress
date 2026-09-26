@@ -265,8 +265,37 @@ route("POST", "/checkout", function() {
     $n = count($cart);
     cart_save([]);
     session::start(); session::set("coupon", "");
+    // Sipariş onayı e-postası (müşteri + contact_email kopyası). Posta hatası
+    // checkout'u ASLA düşürmez — order_confirm_mail her şeyi yutar.
+    order_confirm_mail($oid, $email, $cust_name, $cart, $subtotal, $disc, $applied, $total);
     return response::html(ext_view("commerce", "checkout.html", ["count" => $n, "order_id" => $oid, "total" => $total]));
 });
+// Sipariş özeti postası: kalemler (varyantlı), ara toplam / indirim / toplam, sipariş no.
+// orders.email müşteri adresi; boşsa yalnız contact_email'e (varsa) gider.
+function order_confirm_mail($oid, $email, $cust_name, $cart, $subtotal, $disc, $coupon, $total) {
+    try {
+        if (!mailer_enabled()) { return; }
+        $rows = [];
+        $rows = array::push($rows, ["k" => "Sipariş No", "v" => "#" . $oid]);
+        if ($cust_name != "") { $rows = array::push($rows, ["k" => "Ad Soyad", "v" => $cust_name]); }
+        foreach ($cart as $it) {
+            $label = $it["title"];
+            $vn = cm_str($it, "variant_name", ""); if ($vn != "") { $label = $label . " (" . $vn . ")"; }
+            $rows = array::push($rows, ["k" => $label, "v" => $it["qty"] . " × " . $it["price"]]);
+        }
+        $rows = array::push($rows, ["k" => "Ara toplam", "v" => "" . $subtotal]);
+        if ($disc > 0) { $rows = array::push($rows, ["k" => "İndirim (" . $coupon . ")", "v" => "-" . $disc]); }
+        $rows = array::push($rows, ["k" => "Toplam", "v" => "" . $total]);
+        $subject = "Siparişiniz alındı: #" . $oid;
+        $b = mailer_kv_bodies($subject, "Siparişiniz için teşekkürler. Özet aşağıdadır.", $rows, "Sipariş durumunuzu hesabınızdan takip edebilirsiniz.");
+        if ($email != "") { mailer_send($email, $subject, $b["text"], $b["html"]); }
+        $copy = mailer_contact_email();
+        if ($copy != "" && $copy != $email) {
+            $bc = mailer_kv_bodies("Yeni sipariş: #" . $oid, "Müşteri: " . $email, $rows, "");
+            mailer_send($copy, "Yeni sipariş: #" . $oid, $bc["text"], $bc["html"]);
+        }
+    } catch ($e) { }
+}
 
 // ── admin routes: orders + coupons ────────────────────────────────────────────
 route("GET", "/admin/orders", function() {

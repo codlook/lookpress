@@ -1,0 +1,15 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<h2>Yeni şifre belirle</h2>
+{#if $invalid}<p class="error">Bu bağlantı geçersiz ya da süresi dolmuş. <a href="/hesap/sifremi-unuttum">Yeni bir bağlantı isteyin &rarr;</a></p>{/if}
+{#if $valid}
+{#if $has_error}<p class="error">{$error}</p>{/if}
+<form method="post" action="/hesap/sifre-sifirla" class="contact-form">
+{!$csrf}
+  <input type="hidden" name="token" value="{$token}">
+  <label>Yeni şifre <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+  <label>Yeni şifre (tekrar) <input type="password" name="password2" required minlength="8" autocomplete="new-password"></label>
+  <button type="submit">Şifreyi kaydet</button>
+</form>
+{/if}
+{/block}

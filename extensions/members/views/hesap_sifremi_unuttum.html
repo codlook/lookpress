@@ -1,0 +1,11 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<h2>Şifremi unuttum</h2>
+{#if $sent}<p class="notice">Bu adrese kayıtlı bir hesap varsa şifre sıfırlama bağlantısını e-posta ile gönderdik. Bağlantı 60 dakika geçerlidir.</p>{/if}
+<form method="post" action="/hesap/sifremi-unuttum" class="contact-form">
+{!$csrf}
+  <label>E-posta <input type="email" name="email" required autocomplete="email"></label>
+  <button type="submit">Sıfırlama bağlantısı gönder</button>
+</form>
+<p class="muted"><a href="/hesap/giris">&larr; Giriş sayfasına dön</a></p>
+{/block}

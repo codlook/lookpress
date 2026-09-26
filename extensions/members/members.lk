@@ -16,6 +16,8 @@ use type;
 use array;
 use date;
 use auth;
+use crypto;
+use log;
 
 // CSRF alanı: csrf_field() başka bir ajan tarafından ekleniyor; yoksa boş dize.
 function csrf_field_safe() { try { return csrf_field(); } catch ($e) { return ""; } }
@@ -23,7 +25,51 @@ function csrf_field_safe() { try { return csrf_field(); } catch ($e) { return ""
 // ── şema (tembel, idempotent) ────────────────────────────────────────────────
 function members_init($c) {
     db::exec($c, "CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(190) UNIQUE, password_hash TEXT, name VARCHAR(120), status VARCHAR(20) DEFAULT 'active', created_at INTEGER DEFAULT 0, last_login INTEGER DEFAULT 0)", []);
+    // Şifre sıfırlama token'ları: tek-kullanımlık, 60 dk ömür (expires_at unix ts).
+    db::exec($c, "CREATE TABLE IF NOT EXISTS member_resets (id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, token VARCHAR(64), expires_at INTEGER DEFAULT 0, used INTEGER DEFAULT 0)", []);
 }
+
+// ── şifre sıfırlama ──────────────────────────────────────────────────────────
+// Token 32 bayt → 64 hex (crypto::random_bytes hex döner). Geçerli token satırı
+// (süresi dolmamış + kullanılmamış) ya da null.
+function member_reset_row($c, $token) {
+    if ($token == null) { return null; }
+    $token = string::trim($token);
+    if (string::len($token) != 64) { return null; }
+    $rows = db::query($c, "SELECT id, member_id, expires_at, used FROM member_resets WHERE token = ?", [$token]);
+    if (count($rows) != 1) { return null; }
+    if (type::to_int($rows[0]["used"]) != 0) { return null; }
+    if (type::to_int($rows[0]["expires_at"]) < date::timestamp()) { return null; }
+    return $rows[0];
+}
+// E-posta varsa token üret + bağlantıyı postala. Her durumda sessiz (hesap sızdırma yok).
+// Mailer kapalıysa bağlantı geliştirici için log::warn'a yazılır (bilinçli tek istisna).
+function member_reset_request($c, $email) {
+    if (!member_email_valid($email)) { return; }
+    $rows = db::query($c, "SELECT id, status FROM members WHERE email = ?", [$email]);
+    if (count($rows) != 1) { return; }
+    if ($rows[0]["status"] != "active") { return; }
+    $mid = $rows[0]["id"];
+    // Önceki açık token'ları iptal et: aynı anda tek geçerli bağlantı.
+    db::exec($c, "UPDATE member_resets SET used = 1 WHERE member_id = ? AND used = 0", [$mid]);
+    $token = crypto::random_bytes(32);
+    db::exec($c, "INSERT INTO member_resets (member_id, token, expires_at, used) VALUES (?, ?, ?, 0)", [$mid, $token, date::timestamp() + 3600]);
+    $url = base_url() . "/hesap/sifre-sifirla?token=" . $token;
+    if (!mailer_enabled()) {
+        log::warn("mailer disabled — password reset link for member #" . $mid . ": " . $url);
+        return;
+    }
+    $subject = "Şifre sıfırlama";
+    $b = mailer_link_bodies($subject, "Hesabınız için şifre sıfırlama isteği aldık. Yeni şifre belirlemek için aşağıdaki bağlantıya tıklayın (60 dakika geçerlidir).", $url, "Bu isteği siz yapmadıysanız bu e-postayı yok sayabilirsiniz.");
+    mailer_send($email, $subject, $b["text"], $b["html"]);
+}
+function member_form_sifremi_unuttum($sent) {
+    return member_view("hesap_sifremi_unuttum.html", ["page_title" => "Şifremi unuttum", "sent" => $sent]);
+}
+function member_form_sifre_sifirla($token, $valid, $error) {
+    return member_view("hesap_sifre_sifirla.html", ["page_title" => "Yeni şifre", "token" => $token, "valid" => $valid, "invalid" => !$valid, "error" => $error, "has_error" => ($error != "")]);
+}
+function member_get_token() { $t = request::get("token"); if ($t == null) { return ""; } return string::trim($t); }
 
 // ── oturum yardımcıları ──────────────────────────────────────────────────────
 // Giriş yapmış üyenin satırı (id, email, name, status) ya da null.
@@ -127,6 +173,16 @@ route("GET", "/hesap/{action}", function() {
         $items = member_orders($c, $m);
         return member_view("hesap_siparisler.html", ["page_title" => "Siparişlerim", "items" => $items, "count" => count($items), "has_items" => (count($items) > 0)]);
     }
+    if ($action == "sifremi-unuttum") {
+        if (member_current($c) != null) { return response::redirect("/hesap/profil"); }
+        $sent = request::get("sent"); if ($sent == null) { $sent = ""; }
+        return member_form_sifremi_unuttum($sent == "1");
+    }
+    if ($action == "sifre-sifirla") {
+        $token = member_get_token();
+        $row = member_reset_row($c, $token);
+        return member_form_sifre_sifirla($token, ($row != null), "");
+    }
     return response::status(404, view("notfound.html", []));
 });
 
@@ -188,7 +244,47 @@ route("POST", "/hesap/{action}", function() {
         }
         return member_page_profil($m, "Unknown operation.", "");
     }
+    if ($action == "sifremi-unuttum") {
+        $email = member_norm_email(request::post("email"));
+        // Her hata yutulur: yanıt e-posta var/yok'tan bağımsız hep aynı.
+        try { member_reset_request($c, $email); } catch ($e) { log::warn("password reset request failed: " . $e); }
+        return response::redirect("/hesap/sifremi-unuttum?sent=1");
+    }
+    if ($action == "sifre-sifirla") {
+        $token = member_post("token");
+        $row = member_reset_row($c, $token);
+        if ($row == null) { return member_form_sifre_sifirla("", false, ""); }
+        $p = member_post("password");
+        $p2 = member_post("password2");
+        if (!member_password_valid($p)) { return member_form_sifre_sifirla($token, true, "Password must be at least 8 characters."); }
+        if ($p != $p2) { return member_form_sifre_sifirla($token, true, "Passwords do not match."); }
+        db::exec($c, "UPDATE members SET password_hash = ? WHERE id = ?", [auth::hash($p), $row["member_id"]]);
+        db::exec($c, "UPDATE member_resets SET used = 1 WHERE id = ?", [$row["id"]]);
+        return response::redirect("/hesap/giris?reset=1");
+    }
     return response::status(404, "Unknown action.");
+});
+
+// ── POST /admin/uyeler — pasife al / aktifleştir (TEK yeni route) ──────────────
+// Alanlar: member_id, action = deactivate|activate. CSRF admin formlarında otomatik.
+route("POST", "/admin/uyeler", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("users")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    members_init($c);
+    $mid = type::to_int(member_post("member_id"));
+    $op = member_post("action");
+    if ($mid > 0) {
+        if ($op == "deactivate") {
+            db::exec($c, "UPDATE members SET status = 'inactive' WHERE id = ?", [$mid]);
+            // Açık sıfırlama token'larını da kapat: pasif üye bağlantıyla şifre değiştiremesin.
+            db::exec($c, "UPDATE member_resets SET used = 1 WHERE member_id = ?", [$mid]);
+        }
+        if ($op == "activate") { db::exec($c, "UPDATE members SET status = 'active' WHERE id = ?", [$mid]); }
+    }
+    $q = request::post("q"); if ($q == null) { $q = ""; }
+    $pg = request::post("page"); if ($pg == null) { $pg = "1"; }
+    return response::redirect("/admin/uyeler?q=" . $q . "&page=" . $pg);
 });
 
 // ── /admin/uyeler — salt-okunur üye listesi (arama + sayfalama) ─────────────

@@ -1,0 +1,109 @@
+// src/mailer.lk — ince, ASLA fırlatmayan e-posta sarmalayıcısı. Çekirdek `mail::`
+// modülünün üstünde ürün-katmanı: sağlayıcı env ile seçilir (çekirdek mail_stdlib):
+//   MAIL_PROVIDER = smtp | mailgun | sendgrid | postmark   (boşsa mailer KAPALI)
+//   smtp     → SMTP_HOST (zorunlu), SMTP_PORT(587), SMTP_USER, SMTP_PASS,
+//              SMTP_TLS ("" | starttls | implicit | none), SMTP_EHLO
+//   diğerleri → MAIL_API_KEY (zorunlu), MAIL_DOMAIN (mailgun)
+//   MAIL_FROM → gönderen; yoksa ayarlar `contact_email`, o da yoksa no-reply@<host>
+// Çekirdek imzası: mail::send($to, $subject, $text [, $html [, $from]])
+//   → {ok, status, message}; env eksikse FIRLATIR → burada try/catch ile yutulur.
+// Kural: posta hatası bir isteği asla düşürmez; başarısızlık log::warn'a gider.
+// Route YOK — yalnız fonksiyonlar.
+use mail;
+use log;
+use html;
+use string;
+
+// Sağlayıcı yapılandırılmış mı? (MAIL_PROVIDER boşsa çekirdek "mailgun" varsayar ve
+// API anahtarı yok diye fırlatır — o yüzden açıkça set edilmesini şart koşuyoruz.)
+function mailer_enabled() {
+    $p = env("MAIL_PROVIDER", "");
+    if ($p == "") { return false; }
+    if ($p == "smtp") { return env("SMTP_HOST", "") != ""; }
+    return env("MAIL_API_KEY", "") != "";
+}
+
+// Gönderen adresi: env MAIL_FROM → ayar contact_email → no-reply@<Host>.
+function mailer_from() {
+    $f = env("MAIL_FROM", "");
+    if ($f != "") { return $f; }
+    $ce = "";
+    try { $ce = setting_get(conn(), "contact_email", ""); } catch ($e) { $ce = ""; }
+    if ($ce == null) { $ce = ""; }
+    if (string::trim($ce) != "") { return string::trim($ce); }
+    $host = request::header("Host"); if ($host == null || $host == "") { $host = "localhost"; }
+    // "host:port" → sadece host
+    $parts = string::split($host, ":");
+    return "no-reply@" . $parts[0];
+}
+
+// Sitenin iletişim e-postası (ayarlardan) ya da "".
+function mailer_contact_email() {
+    $ce = "";
+    try { $ce = setting_get(conn(), "contact_email", ""); } catch ($e) { $ce = ""; }
+    if ($ce == null) { return ""; }
+    return string::trim($ce);
+}
+
+// Tek giriş noktası. true/false döner, hiç fırlatmaz.
+function mailer_send($to, $subject, $text_body, $html_body) {
+    if ($to == null || string::trim($to) == "") { return false; }
+    if (!mailer_enabled()) {
+        log::warn("mailer: provider not configured (MAIL_PROVIDER) — skipped mail to " . $to . " [" . $subject . "]");
+        return false;
+    }
+    try {
+        $r = mail::send($to, $subject, $text_body, $html_body, mailer_from());
+        if ($r["ok"] == true) { return true; }
+        $msg = $r["message"]; if ($msg == null) { $msg = ""; }
+        log::warn("mailer: delivery failed to " . $to . " [" . $subject . "]: " . $msg);
+        return false;
+    } catch ($e) {
+        log::warn("mailer: exception while sending to " . $to . " [" . $subject . "]: " . $e);
+        return false;
+    }
+}
+
+// ── şablon yardımcıları ──────────────────────────────────────────────────────
+// Basit, tek kolonlu HTML zarf. $body_html güvenli (çağıran kaçırmış) olmalı.
+function mailer_html_layout($title, $body_html) {
+    $site = "LookPress";
+    try { $site = site_title(); } catch ($e) { $site = "LookPress"; }
+    return "<!doctype html><html><body style=\"margin:0;padding:24px;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b\">"
+        . "<div style=\"max-width:600px;margin:0 auto;background:#fff;border-radius:8px;padding:24px\">"
+        . "<h2 style=\"margin:0 0 16px;font-size:18px\">" . html::escape($title) . "</h2>"
+        . $body_html
+        . "<p style=\"margin:24px 0 0;font-size:12px;color:#71717a\">" . html::escape($site) . "</p>"
+        . "</div></body></html>";
+}
+
+// Anahtar/değer satırlarından (liste: [{k, v}]) hem düz-metin hem HTML gövde üretir.
+// Dönüş: ["text" => ..., "html" => ...]
+function mailer_kv_bodies($title, $intro, $rows, $outro) {
+    $text = $title . "\n\n";
+    if ($intro != "") { $text = $text . $intro . "\n\n"; }
+    $html = "";
+    if ($intro != "") { $html = "<p>" . html::escape($intro) . "</p>"; }
+    $html = $html . "<table style=\"border-collapse:collapse;width:100%\">";
+    foreach ($rows as $r) {
+        $k = $r["k"]; if ($k == null) { $k = ""; }
+        $v = $r["v"]; if ($v == null) { $v = ""; }
+        $text = $text . $k . ": " . $v . "\n";
+        $html = $html . "<tr><td style=\"padding:6px 8px;border-bottom:1px solid #e4e4e7;color:#52525b;vertical-align:top;width:35%\">" . html::escape($k)
+            . "</td><td style=\"padding:6px 8px;border-bottom:1px solid #e4e4e7;white-space:pre-wrap\">" . html::escape($v) . "</td></tr>";
+    }
+    $html = $html . "</table>";
+    if ($outro != "") { $text = $text . "\n" . $outro . "\n"; $html = $html . "<p>" . html::escape($outro) . "</p>"; }
+    return ["text" => $text, "html" => mailer_html_layout($title, $html)];
+}
+
+// Tek bağlantılı (şifre sıfırlama vb.) gövde çifti.
+function mailer_link_bodies($title, $intro, $url, $outro) {
+    $text = $title . "\n\n" . $intro . "\n\n" . $url . "\n";
+    if ($outro != "") { $text = $text . "\n" . $outro . "\n"; }
+    $html = "<p>" . html::escape($intro) . "</p>"
+        . "<p><a href=\"" . html::escape($url) . "\" style=\"display:inline-block;padding:10px 16px;background:#18181b;color:#fff;text-decoration:none;border-radius:6px\">" . html::escape($title) . "</a></p>"
+        . "<p style=\"font-size:12px;color:#71717a;word-break:break-all\">" . html::escape($url) . "</p>";
+    if ($outro != "") { $html = $html . "<p>" . html::escape($outro) . "</p>"; }
+    return ["text" => $text, "html" => mailer_html_layout($title, $html)];
+}

@@ -120,6 +120,9 @@ route("POST", "/forms/{key}", function() {
             $data = array::set($data, $f["name"], $val);
         }
         db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);
+        // Bildirim e-postası (src/mailer.lk): sağlayıcı + contact_email varsa. Posta
+        // hatası isteği ASLA düşürmez (mailer_send fırlatmaz; form_notify_mail try/catch).
+        form_notify_mail($def, $data);
         return response::redirect("/forms/" . $key . "?sent=1");
     }
     // legacy fallback (the styled /contact page posts here with no form definition)
@@ -127,5 +130,28 @@ route("POST", "/forms/{key}", function() {
     $email = request::post("email"); if ($email == null) { $email = ""; }
     $message = request::post("message"); if ($message == null) { $message = ""; }
     db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode(["name" => $name, "email" => $email, "message" => $message]), date::timestamp()]);
+    $ldata = array::new_assoc();
+    $ldata = array::set($ldata, "name", $name); $ldata = array::set($ldata, "email", $email); $ldata = array::set($ldata, "message", $message);
+    form_notify_mail(["title" => "İletişim", "fkey" => $key, "fields" => [["name" => "name", "label" => "Ad"], ["name" => "email", "label" => "E-posta"], ["name" => "message", "label" => "Mesaj"]]], $ldata);
     return response::redirect("/contact?sent=1");
 });
+// Form gönderimi bildirimi → ayarlar `contact_email`. Sessiz: mailer kapalıysa ya da
+// adres yoksa hiçbir şey yapmaz; her hata yutulur (kayıt zaten yazıldı, mailer_send
+// kendi loglar).
+function form_notify_mail($def, $data) {
+    try {
+        if (!mailer_enabled()) { return; }
+        $to = mailer_contact_email();
+        if ($to == "") { return; }
+        $title = $def["title"]; if ($title == null || $title == "") { $title = $def["fkey"]; }
+        $rows = [];
+        foreach ($def["fields"] as $f) {
+            $label = $f["label"]; if ($label == null || $label == "") { $label = $f["name"]; }
+            $val = $data[$f["name"]]; if ($val == null) { $val = ""; }
+            $rows = array::push($rows, ["k" => $label, "v" => "" . $val]);
+        }
+        $subject = "Yeni form gönderimi: " . $title;
+        $b = mailer_kv_bodies($subject, "Sitenizde yeni bir form gönderimi alındı.", $rows, "Gönderimleri yönetim panelinden görüntüleyebilirsiniz.");
+        mailer_send($to, $subject, $b["text"], $b["html"]);
+    } catch ($e) { }
+}

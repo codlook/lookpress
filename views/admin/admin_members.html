@@ -7,7 +7,7 @@
 </form>
 {#if $count == 0}<p class="muted">Üye yok.</p>{/if}
 <div class="table-wrap"><table>
-<thead><tr><th>#</th><th>E-posta</th><th>Ad Soyad</th><th>Durum</th><th>Kayıt</th><th>Son giriş</th></tr></thead>
+<thead><tr><th>#</th><th>E-posta</th><th>Ad Soyad</th><th>Durum</th><th>Kayıt</th><th>Son giriş</th><th></th></tr></thead>
 <tbody>
 {#each $items as $m}<tr>
 <td class="muted">{$m.id}</td>
@@ -16,6 +16,10 @@
 <td>{#if $m.is_active}<span class="badge">aktif</span>{/if}{#if $m.is_inactive}<span class="muted">{$m.status}</span>{/if}</td>
 <td class="muted">{$m.created}</td>
 <td class="muted">{$m.last_login}</td>
+<td>
+{#if $m.is_active}<form method="post" action="/admin/uyeler" class="inline urow" onsubmit="return confirm('Bu üye pasife alınsın mı? Giriş yapamayacak.')"><input type="hidden" name="member_id" value="{$m.id}"><input type="hidden" name="action" value="deactivate"><input type="hidden" name="q" value="{$q}"><input type="hidden" name="page" value="{$page}"><button class="del">Pasife al</button></form>{/if}
+{#if $m.is_inactive}<form method="post" action="/admin/uyeler" class="inline urow"><input type="hidden" name="member_id" value="{$m.id}"><input type="hidden" name="action" value="activate"><input type="hidden" name="q" value="{$q}"><input type="hidden" name="page" value="{$page}"><button class="btn-sm">Aktifleştir</button></form>{/if}
+</td>
 </tr>{/each}
 </tbody>
 </table></div>
@@ -24,5 +28,5 @@
 <span class="muted">Sayfa {$page} / {$pages}</span>
 {#if $has_next}<a href="/admin/uyeler?q={$q}&page={$next}">Sonraki &rarr;</a>{/if}
 </nav>{/if}
-<p class="muted" style="font-size:13px;margin-top:14px">Üyeler mağaza müşterileridir; admin kullanıcılarından ayrı tutulur. Pasife alma/silme bir sonraki dalgada.</p>
+<p class="muted" style="font-size:13px;margin-top:14px">Üyeler mağaza müşterileridir; admin kullanıcılarından ayrı tutulur. Pasif üye giriş yapamaz ve şifre sıfırlayamaz; mevcut oturumu bir sonraki istekte düşer.</p>
 {/block}
