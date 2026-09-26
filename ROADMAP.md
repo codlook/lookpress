@@ -43,8 +43,29 @@ Working and locked by a 34-check smoke suite + CI:
   modular code (`app.lk` · `config/` · `src/` · `routes/` · `views/` · `lib/`).
 
 **Honest status:** great for a content site, blog, catalog, MVP, or internal
-tool **today**. Not yet ready to take real money from real customers — that's
-Phase A.
+tool **today**.
+
+## Near-term focus (what we optimize for first)
+
+LookPress is a tool for **building real websites easily** — the ground held by
+WordPress, Laravel and Django for people who make sites. So the near-term bar is
+**"a developer can model, edit and ship a good-looking real site fast, without
+touching internals"**, not "take money from customers" and not "become a
+framework SDK". Concretely, we prioritize, in order:
+
+1. **Content modeling** — richer field types, so real content shapes are easy.
+2. **Editing experience** — a comfortable admin: media in the editor, a real
+   content editor, sensible defaults.
+3. **Presentation** — themes that look professional and are fully responsive out
+   of the box; reusable section blocks.
+4. **Proof it's fast to build** — a demo site that shows "blog/catalog/brochure
+   site in minutes".
+
+**Deferred on purpose:** payment *integration* (a provider adapter) comes later —
+the platform must be genuinely good at building sites first. A CLI / scaffolding
+SDK is **not** a near-term goal (we are not shipping a framework). The phased
+list below still holds as the longer arc, but this focus reorders what we pull
+from it next.
 
 ## Principles (the engineering guardrails)
 
@@ -143,7 +164,11 @@ module installs and adds routes/admin with no core edits.
 
 ### Sequencing
 
-**A → B → C → D**, but A5 (backups) and A4 (hardening) land immediately since the
-platform is already deployed live. Phase A is what turns "you can start a real
-project" into "you can run a real business." Everything is measured, verified,
-and added to the smoke suite as it ships — no item is "done" until it is.
+The original **A → B → C → D** ordering assumed "run a real business" was the
+next milestone. Per the near-term focus above, we pull **site-building
+usability first**: the C-items that make a site easy to build and good-looking —
+**C2 richer content / better editor, C1 media pipeline, C5 admin maturity** —
+plus theme polish, lead. Backups (A5) and hardening (A4) still land opportunistically
+since the platform is deployed live. Payment (A1) and the framework/CLI items
+(B1/B2) are explicitly later. Everything is measured, verified, and added to the
+smoke suite as it ships — no item is "done" until it is.
