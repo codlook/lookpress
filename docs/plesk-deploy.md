@@ -50,6 +50,7 @@ user), not inline in the unit:
 ```ini
 # $D/.look.env
 DB_DSN=sqlite:///<docroot>/data/cms.db
+LOOK_BYTECODE=0   # VM off: the LOOK 1.0 VM miscompiles an app this size (see docs/cms-spec.md); required until the core fix lands
 ADMIN_PASSWORD=<strong-random>     # unset => admin login disabled (fail-loud)
 LOOK_SESSION_SECURE=1              # cookies Secure (site is behind TLS)
 LOOK_TRUSTED_PROXY=127.0.0.1       # honour X-Forwarded-Proto from the proxy
