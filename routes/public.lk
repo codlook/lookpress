@@ -67,7 +67,11 @@ route("GET", "/sitemap.xml", function() {
     return;
 });
 route("GET", "/robots.txt", function() {
-    response::text("User-agent: *\nAllow: /\nSitemap: " . base_url() . "/sitemap.xml\n");
+    // Ayarlar → SEO → robots_extra: admin'in eklediği satırlar sona eklenir.
+    $extra = setting_get(conn(), "robots_extra", "");
+    if ($extra == null) { $extra = ""; }
+    if ($extra != "") { $extra = string::trim($extra) . "\n"; }
+    response::text("User-agent: *\nAllow: /\nSitemap: " . base_url() . "/sitemap.xml\n" . $extra);
     return;
 });
 route("GET", "/feed", function() {

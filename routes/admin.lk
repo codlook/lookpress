@@ -48,23 +48,10 @@ route("GET", "/admin/logout", function() { session::start(); session::destroy();
 // core dashboard knows nothing of orders/revenue (commerce adds those).
 route("GET", "/admin", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    session::start();
+    // Dashboard verisi tek yerde hesaplanır (src/dashboard.lk): modül sayaçları,
+    // İletişim/E-Ticaret/Üyeler panelleri, sistem özeti ve hızlı işlemler.
     $c = conn();
-    $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
-    $n_content  = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", [])[0]["n"]);
-    $n_subs     = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM form_submissions", [])[0]["n"]);
-    $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
-    $types_html = "";
-    foreach ($types as $t) {
-        $types_html = $types_html . "<li><a href=\"/admin/type/" . $t["slug"] . "\">" . html::escape($t["label"]) . "</a> <span class=\"muted\">(" . html::escape($t["slug"]) . ")</span></li>";
-    }
-    return response::html(admin_view("admin_dashboard.html", [
-        "uname" => $uname, "is_super" => is_super(),
-        "n_content" => $n_content, "n_subs" => $n_subs,
-        "ext_stats" => xp_dashboard_stats(null),
-        "ext_panels" => xp_dashboard_panels(null),
-        "types_html" => $types_html
-    ]));
+    return response::html(admin_view("admin_dashboard.html", dashboard_data($c)));
 });
 
 // ── type-admin: manage content types like modules (list + create) ────────────

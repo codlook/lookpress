@@ -47,6 +47,7 @@ use "src/hooks.lk";    // action/filter registry (the extension seam)
 use "src/core.lk";
 use "src/rbac.lk";     // role-based access control (can())
 use "src/types.lk";
+use "src/dashboard.lk"; // admin dashboard data (counters, panels, quick actions)
 use "src/render.lk";
 use "src/forms.lk";    // form builder (defined forms + submissions)
 use "src/security.lk"; // CSRF + login rate-limit + security headers (functions + before_route)
