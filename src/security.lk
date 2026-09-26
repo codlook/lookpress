@@ -48,6 +48,10 @@ function csrf_required($path) {
     if ($path == "/admin/login") { return false; }
     if (string::starts_with($path, "/admin/")) { return true; }
     if (string::starts_with($path, "/forms/")) { return true; }
+    // extension public POSTs — their forms carry {!$csrf} (csrf_field_safe)
+    if (string::starts_with($path, "/cart/")) { return true; }
+    if ($path == "/checkout") { return true; }
+    if (string::starts_with($path, "/hesap/")) { return true; }
     return false;
 }
 

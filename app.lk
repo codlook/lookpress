@@ -49,9 +49,11 @@ use "src/rbac.lk";     // role-based access control (can())
 use "src/types.lk";
 use "src/render.lk";
 use "src/forms.lk";    // form builder (defined forms + submissions)
+use "src/security.lk"; // CSRF + login rate-limit + security headers (functions + before_route)
 
 // ── extensions (register their own routes + hooks; touch no core file) ────────
 use "extensions/commerce/commerce.lk";
+use "extensions/members/members.lk";   // site members (Üyeler): /hesap/{action} + /admin/uyeler
 
 // ── core route modules (thin controllers) — specific routes first … ──────────
 use "routes/public.lk";

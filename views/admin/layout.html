@@ -1,6 +1,17 @@
 <!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LookPress Admin</title>
+<meta name="csrf" content="{$csrf_token}">
+<script>
+// CSRF: her POST formuna gizli _csrf alanı ekle (capture-phase: onsubmit confirm'lerden önce çalışır);
+// medya-seçici fetch upload'ı window.LP_CSRF ile aynı token'ı gönderir.
+(function(){
+ var m=document.querySelector('meta[name="csrf"]');var t=m?m.getAttribute('content'):'';if(!t)return;
+ document.addEventListener('submit',function(e){var f=e.target;if(!f||!f.method||f.method.toLowerCase()!=='post')return;
+  if(f.querySelector('input[name="_csrf"]'))return;var i=document.createElement('input');i.type='hidden';i.name='_csrf';i.value=t;f.appendChild(i);},true);
+ window.LP_CSRF=t;
+})();
+</script>
 <style>
  :root{
   --accent:#2563eb;--accent-d:#1d4ed8;
@@ -401,9 +412,9 @@
  });
  if(upload)upload.addEventListener('change',function(){
   if(!upload.files||!upload.files[0])return;
-  var fd=new FormData();fd.append('file',upload.files[0]);
+  var fd=new FormData();fd.append('file',upload.files[0]);if(window.LP_CSRF)fd.append('_csrf',window.LP_CSRF);
   grid.innerHTML='<div class="mp-empty">Yükleniyor…</div>';
-  fetch('/admin/media/upload',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(res){
+  fetch('/admin/media/upload',{method:'POST',body:fd,credentials:'same-origin',headers:window.LP_CSRF?{'X-CSRF-Token':window.LP_CSRF}:{}}).then(function(r){return r.json();}).then(function(res){
    upload.value='';
    if(res&&res.ok){pick(res.url);}else{grid.innerHTML='<div class="mp-empty">'+((res&&res.error)||'Yükleme başarısız')+'</div>';}
   }).catch(function(){grid.innerHTML='<div class="mp-empty">Yükleme başarısız.</div>';});

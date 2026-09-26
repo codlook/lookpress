@@ -55,12 +55,12 @@ function member_norm_email($raw) {
 }
 function member_email_valid($email) {
     if ($email == "") { return false; }
-    if (string::length($email) > 190) { return false; }
+    if (string::len($email) > 190) { return false; }
     return string::regex_match($email, "^[^@ ]+@[^@ ]+\\.[^@ ]+$");
 }
 function member_password_valid($p) {
     if ($p == null) { return false; }
-    return string::length($p) >= 8;
+    return string::len($p) >= 8;
 }
 function member_email_taken($c, $email, $except_id) {
     $rows = db::query($c, "SELECT id FROM members WHERE email = ? AND id != ?", [$email, $except_id]);
@@ -140,7 +140,7 @@ route("POST", "/hesap/{action}", function() {
         $name = string::trim(member_post("name"));
         $p = member_post("password");
         if (!member_email_valid($email)) { return member_form_kayit($email, $name, "Please enter a valid email address."); }
-        if ($name == "" || string::length($name) > 120) { return member_form_kayit($email, $name, "Name is required (max 120 characters)."); }
+        if ($name == "" || string::len($name) > 120) { return member_form_kayit($email, $name, "Name is required (max 120 characters)."); }
         if (!member_password_valid($p)) { return member_form_kayit($email, $name, "Password must be at least 8 characters."); }
         if (member_email_taken($c, $email, 0)) { return member_form_kayit($email, $name, "This email is already registered."); }
         $ts = date::timestamp();
@@ -172,7 +172,7 @@ route("POST", "/hesap/{action}", function() {
         $op = member_post("op");
         if ($op == "name") {
             $name = string::trim(member_post("name"));
-            if ($name == "" || string::length($name) > 120) { return member_page_profil($m, "Name is required (max 120 characters).", ""); }
+            if ($name == "" || string::len($name) > 120) { return member_page_profil($m, "Name is required (max 120 characters).", ""); }
             db::exec($c, "UPDATE members SET name = ? WHERE id = ?", [$name, $m["id"]]);
             return member_page_profil(member_current($c), "", "Bilgileriniz güncellendi.");
         }

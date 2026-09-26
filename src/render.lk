@@ -31,6 +31,14 @@ function content_fields($c, $type, $fields_json) {
         // yeni giriş-varyantı alanları anlamlı bir kind taşısın: url → bağlantı,
         // email → mailto bağlantı, tel → tel bağlantı; diğerleri düz metin (row).
         $ft = ""; try { $ft = $f["type"]; } catch ($e) { $ft = ""; }
+        // commerce-owned JSON field types (attributes/variants) render themselves via
+        // xp_content_after_body — skip the raw JSON row. A relation shows the target's
+        // title instead of its id.
+        if ($ft == "attributes" || $ft == "variants") { continue; }
+        if ($ft == "relation") {
+            $rr = db::query($c, "SELECT r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [$v]);
+            if (count($rr) > 0) { $v = $rr[0]["title"]; }
+        }
         // blocks: render the whole block list to HTML (not a label:value row).
         if ($ft == "blocks") {
             $out = array::push($out, ["name" => $name, "value" => render_blocks($v), "kind" => "blocks"]);

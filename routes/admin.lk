@@ -18,12 +18,16 @@ route("POST", "/admin/login", function() {
     $c = conn();
     $u = request::post("username");
     $p = request::post("password");
+    // brute-force guard: 5 failures / 10 min per ip+username (src/security.lk)
+    $lk = login_key($u);
+    if (!login_allowed($lk)) { response::status(429); response::text("Too many attempts. Try again in 10 minutes."); return; }
     if ($u != null) {
         if ($p != null) {
             if ($u != "" && $p != "") {
                 $rows = db::query($c, "SELECT id, password_hash, role FROM users WHERE username = ?", [$u]);
                 if (count($rows) == 1) {
                     if (auth::verify($p, $rows[0]["password_hash"])) {
+                        login_reset($lk);
                         session::start(); session::regenerate();
                         session::set("uid", "" . $rows[0]["id"]);
                         session::set("uname", $u);
@@ -34,6 +38,7 @@ route("POST", "/admin/login", function() {
             }
         }
     }
+    login_failed($lk);
     return response::html(admin_view("login.html", ["error" => "Kullanıcı adı ya da şifre hatalı."]));
 });
 route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
