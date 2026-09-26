@@ -102,15 +102,16 @@ add components. The markdown body remains available for simple posts.
 Legend: ✅ done · 🟡 partial · ⬜ missing. Grouped by wave; a wave ships together,
 verified on a fresh volume (`/en` canary 200, route count ≤ 70, 0 VM fallback).
 
-### Wave 1 — spine, admin IA, security, commerce depth, members
-- ⬜ **Module config** (`config_json`) + defaults; `/admin/types` create/edit takes group/icon/labels/columns/filters/order/public. (spine)
-- ⬜ **Dynamic list**: per-module columns + filters from config; search/pagination kept. (spine)
-- ⬜ **Dynamic sidebar** grouped per the Admin IA table from module config; extensions still inject. (spine)
-- ⬜ **Module templates seeded**: Haberler, Duyurular, Galeri, Videolar, Projeler, Etkinlikler, Slider, Sayfalar (with the right fields). (spine)
-- ⬜ **gallery** + **repeater** field types (server render + admin UI). (spine)
-- ⬜ **CSRF** on admin + public POST; **login rate-limit**; **security headers**. (security)
-- ⬜ **Commerce depth**: Markalar (brand module + relation on product), **Özellikler** (attributes repeater), **Varyantlar** (variants repeater: name/sku/price/stock) incl. cart selecting a variant. (commerce, route-free)
-- ⬜ **Üyeler**: members table, register/login/logout/profile/orders via `/hesap/{action}` (2 routes). (members)
+### Wave 1 — spine, admin IA, security, commerce depth, members ✅ (shipped 2026-09-26, 68/70 routes)
+- ✅ **Module config** (`config_json`) + defaults; Modül Yönetimi create/edit (edit folded into the create POST — zero routes).
+- ✅ **Dynamic list**: per-module columns + filters (`?f_<field>=`) from config; search/pagination kept.
+- ✅ **Dynamic sidebar** grouped per the Admin IA table; extension nav merged into E-Ticaret.
+- ✅ **Module templates seeded**: Sayfalar, Slider (public:false), Haberler, Duyurular, Galeri, Videolar, Projeler, Etkinlikler.
+- ✅ **gallery** + **repeater** field types (admin UI + validation + public render).
+- ✅ **CSRF** (admin auto-inject + public forms + extension forms), **login rate-limit** (5/10 min → 429), **security headers** (CSP/nosniff/X-Frame/Referrer, HSTS behind TLS).
+- ✅ **Commerce depth**: Markalar (module + relation), Özellikler (attributes), Varyantlar (variants with price/stock, storefront select, cart/checkout stock handling).
+- ✅ **Üyeler**: `/hesap/{action}` GET+POST + `/admin/uyeler` (3 routes). Deactivation toggle → Wave 2.
+- Known debt: the `xp_*` seam is single-override (commerce holds xp_migrate/xp_admin_nav) — members uses lazy `CREATE TABLE IF NOT EXISTS` and a sidebar link from the spine; a multi-extension hook chain is a future core-of-LookPress decision. Route budget: **68/70** — Wave 2+ must be route-free.
 
 ### Wave 2 — communication, settings, components
 - 🟡 **İletişim modülü**: forms exist; add submission status workflow (Destek Biletleri: açık/işlemde/kapalı), İş Başvuruları view, notes, CSV export.
