@@ -1,15 +1,30 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<h2>{$type.label} <a class="btn" href="/admin/type/{$type.slug}/new">+ New</a> <a class="btn" href="/admin">Types</a></h2>
-<table>
-<tr><th>Title</th><th>Slug</th><th>Status</th><th></th></tr>
-{#each $items as $it}
-<tr>
+<div class="section-head"><h2>{$type.label} <span class="muted">({$count})</span></h2><a class="btn" href="/admin/type/{$type.slug}/new">+ Yeni</a></div>
+<form method="get" action="/admin/type/{$type.slug}" class="list-filter">
+  <input type="search" name="q" value="{$q}" placeholder="Başlıkta ara…">
+  <select name="status">
+    <option value=""{#if $status_all} selected{/if}>Tüm durumlar</option>
+    <option value="published"{#if $status_pub} selected{/if}>Yayında</option>
+    <option value="draft"{#if $status_draft} selected{/if}>Taslak</option>
+  </select>
+  <button>Filtrele</button>
+</form>
+{#if $count == 0}<p class="muted">Kayıt yok.</p>{/if}
+<div class="table-wrap"><table>
+<thead><tr><th>Başlık</th><th>Slug</th><th>Durum</th><th>İşlemler</th></tr></thead>
+<tbody>
+{#each $items as $it}<tr>
 <td><a href="/admin/type/{$type.slug}/edit/{$it.id}">{$it.title}</a></td>
 <td class="muted">{$it.slug}</td>
 <td>{$it.status}</td>
-<td><a href="/preview/{$it.id}">preview</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Delete?')"><button class="del" type="submit">Delete</button></form></td>
-</tr>
-{/each}
-</table>
+<td><a href="/preview/{$it.id}">önizle</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Silinsin mi?')"><button class="del" type="submit">Sil</button></form></td>
+</tr>{/each}
+</tbody>
+</table></div>
+{#if $multi_page}<nav class="pager">
+{#if $has_prev}<a href="/admin/type/{$type.slug}?q={$q}&status={$status}&page={$prev}">&larr; Önceki</a>{/if}
+<span class="muted">Sayfa {$page} / {$pages}</span>
+{#if $has_next}<a href="/admin/type/{$type.slug}?q={$q}&status={$status}&page={$next}">Sonraki &rarr;</a>{/if}
+</nav>{/if}
 {/block}

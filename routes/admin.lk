@@ -121,8 +121,28 @@ route("GET", "/admin/type/{type}", function() {
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
-    $items = db::query($c, "SELECT c.id, c.slug, c.status, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY c.updated_at DESC", [$t["slug"]]);
-    return response::html(admin_view("admin_type_list.html", ["type" => $t, "items" => $items]));
+    // search (title) + status filter + pagination
+    $q = string::trim(request::get("q") ?? "");
+    $status = request::get("status") ?? "";
+    $per = 20;
+    $page = type::to_int(request::get("page") ?? "1"); if ($page < 1) { $page = 1; }
+    $where = "c.type = ?"; $params = [$t["slug"]];
+    if ($q != "") { $where = $where . " AND r.title LIKE ?"; $params = array::push($params, "%" . $q . "%"); }
+    if ($status == "draft" || $status == "published") { $where = $where . " AND c.status = ?"; $params = array::push($params, $status); }
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content c JOIN revisions r ON r.id = c.current_rev WHERE " . $where, $params)[0]["n"]);
+    $pages = ($total + $per - 1) / $per; $pages = type::to_int($pages); if ($pages < 1) { $pages = 1; }
+    if ($page > $pages) { $page = $pages; }
+    $offset = ($page - 1) * $per;
+    $qp = $params; $qp = array::push($qp, $per); $qp = array::push($qp, $offset);
+    $items = db::query($c, "SELECT c.id, c.slug, c.status, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE " . $where . " ORDER BY c.updated_at DESC LIMIT ? OFFSET ?", $qp);
+    return response::html(admin_view("admin_type_list.html", [
+        "type" => $t, "items" => $items, "count" => $total,
+        "q" => $q, "status" => $status,
+        "status_all" => ($status != "draft" && $status != "published"),
+        "status_pub" => ($status == "published"), "status_draft" => ($status == "draft"),
+        "page" => $page, "pages" => $pages, "prev" => $page - 1, "next" => $page + 1,
+        "has_prev" => ($page > 1), "has_next" => ($page < $pages), "multi_page" => ($pages > 1)
+    ]));
 });
 
 route("GET", "/admin/type/{type}/new", function() {
