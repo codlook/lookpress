@@ -216,6 +216,32 @@ route("POST", "/admin/type/{type}/delete/{id}", function() {
     db::exec($c, "DELETE FROM content WHERE id = ?", [request::param("id")]);
     return response::redirect("/admin/type/" . request::param("type"));
 });
+// Duplicate an item as a new draft (copies the current revision's fields).
+route("POST", "/admin/type/{type}/duplicate/{id}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $t = load_type($c, request::param("type"));
+    if ($t == null) { return response::status(404, "No such type"); }
+    $rows = db::query($c, "SELECT c.slug, c.lang, r.title, r.body_md, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 0) { return response::redirect("/admin/type/" . $t["slug"]); }
+    $lang = $rows[0]["lang"];
+    $vals = json::decode($rows[0]["fields_json"]); if ($vals == null) { $vals = array::new_assoc(); }
+    // title/body live as revision columns (not always in fields_json) — carry them over.
+    $vals = array::set($vals, "title", $rows[0]["title"] . " (kopya)");
+    $bmd = $rows[0]["body_md"]; if ($bmd == null) { $bmd = ""; }
+    $vals = array::set($vals, "body", $bmd);
+    $base = $rows[0]["slug"] . "-kopya";
+    $newslug = $base;
+    if (slug_taken($c, $t["slug"], $newslug, 0, $lang)) {
+        foreach ([2, 3, 4, 5, 6, 7, 8, 9, 10] as $i) {
+            $try = $base . "-" . $i;
+            if (!slug_taken($c, $t["slug"], $try, 0, $lang)) { $newslug = $try; break; }
+        }
+    }
+    $newid = save_content($c, $t["slug"], 0, $newslug, $vals, "draft", $lang);
+    return response::redirect("/admin/type/" . $t["slug"] . "/edit/" . $newid);
+});
 
 // ── revision history + rollback (versioned core: rollback = a pointer move) ───
 route("GET", "/admin/type/{type}/history/{id}", function() {
@@ -253,18 +279,35 @@ route("POST", "/admin/type/{type}/rollback/{id}", function() {
 });
 
 // ── JSON API — published_rev ONLY (read-surface invariant) ────────────────────
+// Read API — published only, no auth. Pagination + title search + category filter +
+// single-item (?slug=). {data, meta}. NOTE: kept at 2 segments on purpose — a 3-seg
+// /api/v1/{type} route shadows the dynamic /{a}/{b}/{c} dispatch in LOOK's router.
 route("GET", "/api/{type}", function() {
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
-    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC", [$t["slug"]]);
+    $per = type::to_int(request::get("limit") ?? "20"); if ($per < 1) { $per = 20; } if ($per > 100) { $per = 100; }
+    $page = type::to_int(request::get("page") ?? "1"); if ($page < 1) { $page = 1; }
+    $q = string::trim(request::get("q") ?? "");
+    $cat = request::get("category"); if ($cat == null) { $cat = ""; }
+    $slugq = request::get("slug"); if ($slugq == null) { $slugq = ""; }
+    $where = "c.type = ? AND c.published_rev > 0"; $params = [$t["slug"]];
+    if ($slugq != "") { $where = $where . " AND c.slug = ?"; $params = array::push($params, $slugq); }
+    if ($q != "") { $where = $where . " AND r.title LIKE ?"; $params = array::push($params, "%" . $q . "%"); }
+    if ($cat != "") { $where = $where . " AND r.fields_json LIKE ?"; $params = array::push($params, "%\"category\":\"" . $cat . "\"%"); }
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content c JOIN revisions r ON r.id = c.published_rev WHERE " . $where, $params)[0]["n"]);
+    $pages = ($total + $per - 1) / $per; $pages = type::to_int($pages); if ($pages < 1) { $pages = 1; }
+    $offset = ($page - 1) * $per;
+    $qp = $params; $qp = array::push($qp, $per); $qp = array::push($qp, $offset);
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE " . $where . " ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?", $qp);
     $out = [];
     foreach ($rows as $row) {
-        $item = json::decode($row["fields_json"]);
+        $item = json::decode($row["fields_json"]); if ($item == null) { $item = array::new_assoc(); }
         $item = array::set($item, "slug", $row["slug"]);
+        $item = array::set($item, "title", $row["title"]);
         $out = array::push($out, $item);
     }
-    response::text(json::encode($out));
+    response::text(json::encode(["data" => $out, "meta" => ["page" => $page, "limit" => $per, "total" => $total, "pages" => $pages]]));
     response::header("Content-Type", "application/json");
     return;
 });
