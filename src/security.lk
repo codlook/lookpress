@@ -1,0 +1,115 @@
+// src/security.lk — güvenlik tabanı: CSRF, login hız sınırı, güvenlik başlıkları.
+// Route YOK — yalnız fonksiyonlar + tek bir before_route middleware'i (route bütçesi
+// sıfır). Ürün katmanı: çekirdek stdlib'e dokunmaz, sadece doğrulanmış adları kullanır:
+//   request::method/path/ip/post/header · response::status/header/text · stop()
+//   session::start/get/set · crypto::random_bytes (hex döner) · cache::get/set/delete
+//   string::starts_with/lower/trim · html::escape · type::to_int · env()
+use session;
+use crypto;
+use cache;
+use string;
+use html;
+use type;
+
+// ── CSRF ─────────────────────────────────────────────────────────────────────
+// Oturum başına bir token (32 bayt → 64 hex). Varsa yeniden kullanılır; böylece
+// aynı oturumda açık duran birden çok sekme/form birbirini geçersiz kılmaz.
+function csrf_token() {
+    session::start();
+    $t = session::get("_csrf");
+    if ($t == null || $t == "") {
+        $t = crypto::random_bytes(32);
+        session::set("_csrf", $t);
+    }
+    return $t;
+}
+// Formların içine gömülecek gizli alan (değer html::escape ile kaçırılır).
+function csrf_field() {
+    return "<input type=\"hidden\" name=\"_csrf\" value=\"" . html::escape(csrf_token()) . "\">";
+}
+// Gönderilen token'ı oturumdakiyle karşılaştır. Kaynak sırası: POST alanı `_csrf`
+// (klasik form + multipart) → `X-CSRF-Token` başlığı (fetch/AJAX yükleyici).
+// Oturumda token yoksa (form hiç render edilmemiş) reddet — "boş == boş" kabul yok.
+function csrf_verify() {
+    session::start();
+    $t = session::get("_csrf");
+    if ($t == null || $t == "") { return false; }
+    $sent = request::post("_csrf");
+    if ($sent == null || $sent == "") { $sent = request::header("X-CSRF-Token"); }
+    if ($sent == null || $sent == "") { return false; }
+    return $sent == $t;
+}
+
+// Bu POST yolu CSRF doğrulaması ister mi? Kapsam: /admin/* (login hariç — oturum
+// henüz yok, token da yok; login'i login hız sınırı korur) + herkese açık form
+// gönderimi /forms/{key}. /admin/media/upload MUAF DEĞİL: yükleyici fetch'i
+// `_csrf` alanını FormData'ya ekler + X-CSRF-Token başlığı gönderir (layout.html).
+function csrf_required($path) {
+    if ($path == "/admin/login") { return false; }
+    if (string::starts_with($path, "/admin/")) { return true; }
+    if (string::starts_with($path, "/forms/")) { return true; }
+    return false;
+}
+
+// ── login hız sınırı (IP + kullanıcı adı başına, cache:: TTL penceresi) ───────
+// 5 başarısız deneme / 10 dk. Her başarısızlık TTL'i tazeler → pencere son
+// denemeden itibaren kayar. Not: cache:: süreç içi bellektir; çok-süreçli FCGI'de
+// sayaç süreç başınadır (yine de üst sınır = 5 × süreç sayısı, sınırsız değil).
+function login_max_attempts() { return 5; }
+function login_window_sec() { return 600; }
+function login_key($username) {
+    $ip = request::ip(); if ($ip == null) { $ip = ""; }
+    if ($username == null) { $username = ""; }
+    return "login:" . $ip . ":" . string::lower(string::trim($username));
+}
+function login_allowed($key) {
+    $n = cache::get($key);
+    if ($n == null) { return true; }
+    return type::to_int($n) < login_max_attempts();
+}
+function login_failed($key) {
+    $n = cache::get($key);
+    if ($n == null) { $n = 0; }
+    cache::set($key, type::to_int($n) + 1, login_window_sec());
+}
+// Başarılı girişte sayacı sıfırla (meşru kullanıcı yazım hatalarıyla kilitlenmesin).
+function login_reset($key) { cache::delete($key); }
+
+// ── güvenlik başlıkları ───────────────────────────────────────────────────────
+// before_route ile route AYNI WebContext'i paylaşır (http_main.cpp: vm.set_web_context
+// (&web) → before_closures → dispatch_routes); response::header burada set edilince
+// nihai yanıtta kalır. Route sonradan aynı adı yazarsa onunki kazanır (map).
+// HSTS: yalnız gerçek HTTPS'te. Sinyal: LOOK_SESSION_SECURE=1 ya da X-Forwarded-Proto
+// https. Başlık sahte olsa bile zararsız — tarayıcı HSTS'i düz HTTP'de yok sayar.
+function is_https_request() {
+    if (env("LOOK_SESSION_SECURE", "") == "1") { return true; }
+    $xf = request::header("X-Forwarded-Proto");
+    if ($xf == null) { return false; }
+    return string::starts_with(string::lower(string::trim($xf)), "https");
+}
+function security_headers() {
+    response::header("X-Content-Type-Options", "nosniff");
+    response::header("X-Frame-Options", "SAMEORIGIN");
+    response::header("Referrer-Policy", "strict-origin-when-cross-origin");
+    // Muhafazakâr CSP: admin ve tema inline <script>/<style> kullanır → 'unsafe-inline';
+    // görseller yerel + data: + herhangi https (içerik editörü dış görsel gömebilir);
+    // dış script/font/iframe kaynağı yok (views/ taranarak doğrulandı).
+    response::header("Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+        . "img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; "
+        . "frame-ancestors 'self'; base-uri 'self'; object-src 'none'");
+    if (is_https_request()) {
+        response::header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+}
+
+// ── middleware: her istekte başlıklar; kapsamlı POST'larda CSRF ───────────────
+before_route(function() {
+    security_headers();
+    if (request::method() != "POST") { return; }
+    if (!csrf_required(request::path())) { return; }
+    if (csrf_verify()) { return; }
+    response::status(403);
+    response::text("Forbidden: missing or invalid CSRF token. Reload the form and try again.");
+    stop();
+});
