@@ -1,11 +1,11 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>İçerik tipleri <span class="muted">({$count})</span></h2><a class="btn" href="/admin/types/new">+ Yeni tip</a></div>
-<p class="muted" style="font-size:13px;margin:0 0 12px">Her içerik tipi bir modül gibidir: tanımladığınızda otomatik CRUD, API (<code>/api/&lt;tip&gt;</code>) ve public URL kazanır ve sol menüde kendi bölümü olur.</p>
+<div class="section-head"><h2>Modül Yönetimi <span class="muted">({$count})</span></h2><a class="btn" href="/admin/types/new">+ Yeni modül</a></div>
+<p class="muted" style="font-size:13px;margin:0 0 12px">Her modül bir içerik tipi + yapılandırmasıdır: tanımladığınızda otomatik CRUD, API (<code>/api/&lt;slug&gt;</code>), isteğe bağlı public URL ve sol menüde kendi grubunda bir bölüm kazanır.</p>
 <div class="table-wrap"><table>
-<thead><tr><th>Tip</th><th>Slug</th><th>URL deseni</th><th>İçerik</th><th>İşlemler</th></tr></thead>
+<thead><tr><th>Modül</th><th>Slug</th><th>Grup</th><th>URL deseni</th><th>Public</th><th>İçerik</th><th>İşlemler</th></tr></thead>
 <tbody>
-{#each $items as $it}<tr><td><a href="/admin/type/{$it.slug}"><b>{$it.label}</b></a></td><td><code>{$it.slug}</code></td><td class="muted">{$it.url_pattern}</td><td>{$it.n}</td><td><a href="/admin/type/{$it.slug}">Yönet</a> &middot; <a href="/admin/type/{$it.slug}/new">+ Ekle</a></td></tr>{/each}
+{#each $items as $it}<tr><td><a href="/admin/type/{$it.slug}">{$it.icon} <b>{$it.plural}</b></a></td><td><code>{$it.slug}</code></td><td>{$it.group}</td><td class="muted">{$it.url_pattern}</td><td>{#if $it.public}evet{/if}{#if !$it.public}<span class="muted">hayır</span>{/if}</td><td>{$it.n}</td><td><a href="/admin/type/{$it.slug}">Yönet</a> &middot; <a href="/admin/type/{$it.slug}/new">+ Ekle</a> &middot; <a href="/admin/types/new?edit={$it.slug}">Düzenle</a></td></tr>{/each}
 </tbody>
 </table></div>
 {/block}

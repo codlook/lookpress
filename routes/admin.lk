@@ -67,22 +67,62 @@ route("GET", "/admin/types", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("types")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
-    $types = db::query($c, "SELECT slug, label, url_pattern FROM content_types ORDER BY label", []);
+    $types = db::query($c, "SELECT slug, label, url_pattern, config_json FROM content_types ORDER BY label", []);
     $items = [];
     foreach ($types as $t) {
         $n = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = ?", [$t["slug"]])[0]["n"]);
-        $items = array::push($items, ["slug" => $t["slug"], "label" => $t["label"], "url_pattern" => $t["url_pattern"], "n" => $n]);
+        $cfg = type_config_decode($t["slug"], $t["label"], $t["config_json"]);
+        $up = $t["url_pattern"]; if ($up == null) { $up = ""; }
+        $items = array::push($items, ["slug" => $t["slug"], "label" => $t["label"], "url_pattern" => $up, "n" => $n,
+            "icon" => $cfg["icon"], "group" => module_group_label($cfg["group"]), "plural" => $cfg["plural"], "public" => $cfg["public"]]);
     }
     return response::html(admin_view("admin_types.html", ["items" => $items, "count" => count($types)]));
 });
+// Modül tanım formu verisi (yeni / düzenleme / hata-yeniden-göster) — tek yerden.
+function type_def_view_data($slug, $label, $url, $fields_raw, $cfg, $edit_slug, $errors) {
+    $groups = [];
+    foreach (module_groups() as $g) {
+        $groups = array::push($groups, ["key" => $g["key"], "label" => $g["label"], "selected" => ($g["key"] == $cfg["group"])]);
+    }
+    return [
+        "slug" => $slug, "label" => $label, "url_pattern" => $url, "fields" => $fields_raw,
+        "edit_slug" => $edit_slug, "is_edit" => ($edit_slug != ""),
+        "singular" => $cfg["singular"], "plural" => $cfg["plural"], "icon" => $cfg["icon"],
+        "order" => type::to_string($cfg["order"]), "public" => $cfg["public"],
+        "list_columns" => string::join($cfg["list_columns"], ", "), "filters" => string::join($cfg["filters"], ", "),
+        "groups" => $groups, "errors" => $errors
+    ];
+}
+// Formdan gelen modül config'ini oku (boş alan → varsayılan; singular/plural boşsa label).
+function type_def_post_config($slug, $label) {
+    $cfg = type_config_defaults($slug, $label);
+    $grp = request::post("group"); if ($grp == null) { $grp = ""; }
+    if (array::contains(module_group_keys(), $grp)) { $cfg["group"] = $grp; }
+    $ic = request::post("icon"); if ($ic != null && string::trim($ic) != "") { $cfg["icon"] = string::trim($ic); }
+    $sg = request::post("singular"); if ($sg != null && string::trim($sg) != "") { $cfg["singular"] = string::trim($sg); }
+    $pl = request::post("plural"); if ($pl != null && string::trim($pl) != "") { $cfg["plural"] = string::trim($pl); }
+    $ord = request::post("order"); if ($ord != null && string::regex_match(string::trim($ord), "^-?[0-9]+$")) { $cfg["order"] = type::to_int(string::trim($ord)); }
+    $cfg["public"] = (request::post("public") == "1");
+    $cols = csv_list(request::post("list_columns")); if (count($cols) > 0) { $cfg["list_columns"] = $cols; }
+    $cfg["filters"] = csv_list(request::post("filters"));
+    return $cfg;
+}
+// GET /admin/types/new — yeni modül; ?edit=<slug> ile mevcut modülü düzenle (aynı
+// form, gizli edit_slug; route bütçesi: sıfır yeni route).
 route("GET", "/admin/types/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("types")) { return response::status(403, "Yetkiniz yok."); }
-    return response::html(admin_view("admin_type_def.html", [
-        "slug" => "", "label" => "", "url_pattern" => "/{slug}",
-        "fields" => "[\n  {\"name\":\"title\",\"type\":\"text\",\"required\":true},\n  {\"name\":\"body\",\"type\":\"markdown\"}\n]",
-        "errors" => []
-    ]));
+    $edit = request::get("edit"); if ($edit == null) { $edit = ""; }
+    if ($edit != "") {
+        $t = load_type(conn(), $edit);
+        if ($t == null) { return response::status(404, "No such type"); }
+        $up = $t["url_pattern"]; if ($up == null) { $up = ""; }
+        return response::html(admin_view("admin_type_def.html",
+            type_def_view_data($t["slug"], $t["label"], $up, json::encode($t["fields"]), $t["config"], $t["slug"], [])));
+    }
+    return response::html(admin_view("admin_type_def.html", type_def_view_data("", "", "/{slug}",
+        "[\n  {\"name\":\"title\",\"type\":\"text\",\"required\":true},\n  {\"name\":\"body\",\"type\":\"markdown\"}\n]",
+        type_config_defaults("", ""), "", [])));
 });
 route("POST", "/admin/types/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -90,27 +130,47 @@ route("POST", "/admin/types/new", function() {
     $c = conn();
     $slug = string::trim(request::post("slug"));
     $label = string::trim(request::post("label"));
-    $url = string::trim(request::post("url_pattern"));
+    $url = request::post("url_pattern"); if ($url == null) { $url = ""; } $url = string::trim($url);
     $fields_raw = request::post("fields");
+    $edit_slug = request::post("edit_slug"); if ($edit_slug == null) { $edit_slug = ""; } $edit_slug = string::trim($edit_slug);
+    $cfg = type_def_post_config($slug, $label);
     $errs = [];
     if (!string::regex_match($slug, "^[a-z][a-z0-9_]*$")) { $errs = array::push($errs, "slug must be lowercase letters/digits/underscore, starting with a letter"); }
-    if (!string::regex_match($url, "\\{slug\\}")) { $errs = array::push($errs, "url_pattern must contain {slug}"); }
+    if ($label == "") { $errs = array::push($errs, "label is required"); }
+    // url_pattern boş = public sayfa yok; doluysa {slug} içermeli
+    if ($url != "" && !string::regex_match($url, "\\{slug\\}")) { $errs = array::push($errs, "url_pattern must contain {slug} (or be empty for no public page)"); }
     $fields = json::decode($fields_raw);
-    if ($fields == null) { $errs = array::push($errs, "fields must be valid JSON"); }
+    if ($fields == null || !type::is_array($fields)) { $errs = array::push($errs, "fields must be valid JSON"); }
     else {
-        $has_title = false; $has_body = false;
+        $has_title = false;
         foreach ($fields as $f) {
-            if ($f["name"] == "title") { $has_title = true; }
-            if ($f["name"] == "body") { $has_body = true; }
+            $fn = $f["name"]; if ($fn == null) { $fn = ""; }
+            if ($fn == "title") { $has_title = true; }
+            if (!string::regex_match($fn, "^[a-z][a-z0-9_]*$")) { $errs = array::push($errs, "field name '" . $fn . "' must be lowercase letters/digits/underscore"); }
         }
-        if (!$has_title || !$has_body) { $errs = array::push($errs, "fields must include a 'title' and a 'body'"); }
+        if (!$has_title) { $errs = array::push($errs, "fields must include a 'title'"); }
     }
-    if (count(db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug])) > 0) { $errs = array::push($errs, "a type with that slug already exists"); }
+    $exists = count(db::query($c, "SELECT id FROM content_types WHERE slug = ?", [$slug])) > 0;
+    if ($edit_slug == "") {
+        if ($exists) { $errs = array::push($errs, "a type with that slug already exists"); }
+    } else {
+        // düzenleme: slug değişmez (içerik satırları type=slug ile bağlı)
+        if ($slug != $edit_slug) { $errs = array::push($errs, "slug cannot be changed on an existing module"); }
+        if (!$exists) { $errs = array::push($errs, "no such module: " . $edit_slug); }
+    }
+    if ($url != "") {
+        $clash = db::query($c, "SELECT slug FROM content_types WHERE url_pattern = ? AND slug != ?", [$url, $slug]);
+        if (count($clash) > 0) { $errs = array::push($errs, "url_pattern is already used by module '" . $clash[0]["slug"] . "'"); }
+    }
     if (count($errs) > 0) {
-        return response::html(admin_view("admin_type_def.html", ["slug" => $slug, "label" => $label, "url_pattern" => $url, "fields" => $fields_raw, "errors" => $errs]));
+        return response::html(admin_view("admin_type_def.html", type_def_view_data($slug, $label, $url, $fields_raw, $cfg, $edit_slug, $errs)));
     }
-    db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json) VALUES (?, ?, ?, ?)", [$slug, $label, $url, json::encode($fields)]);
-    types_cache_bust();   // new type's URL live immediately (no 60s TTL lag)
+    if ($edit_slug == "") {
+        db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json, config_json) VALUES (?, ?, ?, ?, ?)", [$slug, $label, $url, json::encode($fields), json::encode($cfg)]);
+    } else {
+        db::exec($c, "UPDATE content_types SET label = ?, url_pattern = ?, fields_json = ?, config_json = ? WHERE slug = ?", [$label, $url, json::encode($fields), json::encode($cfg), $slug]);
+    }
+    types_cache_bust();   // new/changed URL live immediately (no 60s TTL lag)
     return response::redirect("/admin/type/" . $slug);
 });
 
@@ -121,20 +181,34 @@ route("GET", "/admin/type/{type}", function() {
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
-    // search (title) + status filter + pagination
+    // search (title) + config.filters (status / field filters) + pagination.
+    // Columns come from config.list_columns; field values decode from each row's
+    // revisions.fields_json — ONE query per page of rows, no per-row lookups.
     $q = string::trim(request::get("q") ?? "");
-    $status = request::get("status") ?? "";
     $per = 20;
     $page = type::to_int(request::get("page") ?? "1"); if ($page < 1) { $page = 1; }
+    // aktif filtre değerleri: ?f_<name>=…  (status için ?status= de kabul — eski linkler)
+    $active = array::new_assoc();
+    $qs = "";   // sayfalama linkleri için filtre query-string'i
+    foreach ($t["config"]["filters"] as $fname) {
+        $fv = request::get("f_" . $fname);
+        if ($fv == null && $fname == "status") { $fv = request::get("status"); }
+        if ($fv == null) { $fv = ""; }
+        $fv = string::trim($fv);
+        $active = array::set($active, $fname, $fv);
+        if ($fv != "") { $qs = $qs . "&f_" . $fname . "=" . html::escape($fv); }
+    }
     $where = "c.type = ?"; $params = [$t["slug"]];
     if ($q != "") { $where = $where . " AND r.title LIKE ?"; $params = array::push($params, "%" . $q . "%"); }
-    if ($status == "draft" || $status == "published") { $where = $where . " AND c.status = ?"; $params = array::push($params, $status); }
+    $fw = list_filter_where($t, $active);
+    $where = $where . $fw["sql"];
+    foreach ($fw["params"] as $p) { $params = array::push($params, $p); }
     $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content c JOIN revisions r ON r.id = c.current_rev WHERE " . $where, $params)[0]["n"]);
     $pages = ($total + $per - 1) / $per; $pages = type::to_int($pages); if ($pages < 1) { $pages = 1; }
     if ($page > $pages) { $page = $pages; }
     $offset = ($page - 1) * $per;
     $qp = $params; $qp = array::push($qp, $per); $qp = array::push($qp, $offset);
-    $rows = db::query($c, "SELECT c.id, c.slug, c.status, c.publish_at, c.published_rev, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE " . $where . " ORDER BY c.updated_at DESC LIMIT ? OFFSET ?", $qp);
+    $rows = db::query($c, "SELECT c.id, c.slug, c.status, c.lang, c.updated_at, c.publish_at, c.published_rev, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE " . $where . " ORDER BY c.updated_at DESC LIMIT ? OFFSET ?", $qp);
     // Mark items whose publish is scheduled for later (published status but held back:
     // published_rev still 0 with a future publish_at) so the list can badge them.
     $items = [];
@@ -143,13 +217,15 @@ route("GET", "/admin/type/{type}", function() {
         $it = array::set($it, "is_scheduled", $sch);
         $sa = $it["publish_at"]; if ($sa == null) { $sa = ""; }
         $it = array::set($it, "sched_at", $sa);
+        $it = array::set($it, "cells", list_row_cells($t, $it));
         $items = array::push($items, $it);
     }
+    $columns = [];
+    foreach ($t["config"]["list_columns"] as $col) { $columns = array::push($columns, ["name" => $col, "label" => list_col_label($t, $col)]); }
     return response::html(admin_view("admin_type_list.html", [
         "type" => $t, "items" => $items, "count" => $total,
-        "q" => $q, "status" => $status,
-        "status_all" => ($status != "draft" && $status != "published"),
-        "status_pub" => ($status == "published"), "status_draft" => ($status == "draft"),
+        "q" => $q, "qs" => $qs,
+        "columns" => $columns, "filter_defs" => list_filter_defs($c, $t, $active),
         "page" => $page, "pages" => $pages, "prev" => $page - 1, "next" => $page + 1,
         "has_prev" => ($page > 1), "has_next" => ($page < $pages), "multi_page" => ($pages > 1)
     ]));

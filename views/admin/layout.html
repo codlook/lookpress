@@ -197,9 +197,62 @@
  .fb-req input{width:auto;margin:0}
  .fb-del{padding:4px 10px;font-size:15px;line-height:1}
  .fb-bar{display:flex;gap:8px;align-items:center;margin:4px 0 6px}
+
+ /* ---- module definition form + dynamic list ---- */
+ .grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}
+ @media(max-width:720px){ .grid2{grid-template-columns:1fr} }
+ .list-thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#eef1f8;display:block}
+ .list-filter .lf-text{width:auto;min-width:140px;margin-top:0}
+ .row-actions{white-space:nowrap}
+
+ /* ---- gallery / repeater field editor (.multi-editor) ---- */
+ .field-block{margin-top:12px}
+ .field-block .fb-label{display:block;font-weight:500;margin-bottom:4px}
+ .multi-editor .me-rows{display:flex;flex-direction:column;gap:6px;margin:4px 0 6px}
+ .me-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:8px}
+ .me-row input,.me-row select,.me-row textarea{margin-top:0;flex:1;min-width:120px}
+ .me-row img{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#eef1f8;flex:0 0 auto}
+ .me-row .me-idx{color:var(--muted);font-size:12px;flex:0 0 auto;min-width:18px}
+ .me-row .me-sub{display:flex;flex-direction:column;flex:1;min-width:140px;font-size:12px;color:var(--muted)}
+ .me-row .me-sub input,.me-row .me-sub select,.me-row .me-sub textarea{min-width:0;width:100%}
+ .me-empty{color:var(--muted);font-size:13px;padding:8px 0}
+ .me-bar{display:flex;gap:8px;align-items:center;margin:4px 0 6px}
  .menu-form{max-width:560px}
  .menu-row{display:flex;gap:8px;margin-bottom:8px}
  .menu-row input{margin-top:0;flex:1}
+
+ /* ---- visual block editor (Gutenberg tarzı) ---- */
+ .block-editor{margin-top:5px}
+ .block-editor .be-stack{display:flex;flex-direction:column;gap:10px;margin:6px 0}
+ .be-empty{color:var(--muted);font-size:13px;padding:14px;text-align:center;border:1px dashed var(--line);border-radius:10px;background:#f8fafc}
+ .blk-card{border:1px solid var(--line);border-radius:10px;background:var(--panel);box-shadow:var(--shadow);overflow:hidden}
+ .blk-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:#f8fafc;border-bottom:1px solid var(--line)}
+ .blk-kind{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+ .blk-head .spacer{margin-left:auto}
+ .blk-tool{background:#fff;color:var(--fg);border:1px solid var(--line);padding:4px 9px;border-radius:6px;
+   font-size:14px;line-height:1;cursor:pointer;transition:all .12s;min-width:30px}
+ .blk-tool:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+ .blk-tool.blk-del:hover{background:var(--danger);border-color:var(--danger)}
+ .blk-tool:disabled{opacity:.35;cursor:not-allowed}
+ .blk-tool:disabled:hover{background:#fff;color:var(--fg);border-color:var(--line)}
+ .blk-body{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+ .blk-body label{margin:0;font-size:13px;font-weight:500}
+ .blk-body input,.blk-body textarea,.blk-body select{margin-top:3px}
+ .blk-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+ .blk-row .blk-lvl{width:auto;flex:0 0 auto}
+ .blk-row .blk-grow{flex:1;min-width:140px}
+ .blk-sub{display:flex;gap:8px;align-items:center;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+ .blk-sub input{margin-top:0;flex:1}
+ .blk-sub img{width:44px;height:44px;object-fit:cover;border-radius:6px;background:#eef1f8;flex:0 0 auto}
+ .blk-subs{display:flex;flex-direction:column;gap:6px}
+ .be-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 6px;position:relative}
+ .be-addwrap{position:relative;display:inline-block}
+ .be-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:20;background:var(--panel);border:1px solid var(--line);
+   border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.18);padding:6px;display:none;
+   grid-template-columns:1fr 1fr;gap:4px;min-width:220px}
+ .be-menu.open{display:grid}
+ .be-menu button{background:none;color:var(--fg);text-align:left;font-weight:500;padding:7px 10px;border-radius:7px;font-size:13px}
+ .be-menu button:hover{background:var(--bg)}
 
  /* ---- markdown editor toolbar ---- */
  .md-wrap{margin-top:5px}
@@ -218,20 +271,8 @@
  <aside class="sidebar" id="sidebar">
   <div class="logo"><span class="dot">L</span> LookPress</div>
   <nav class="snav">
-   <a href="/admin" data-nav="/admin"><span class="ic">▤</span> Panel</a>
-   <div class="grp">İçerik Yönetimi</div>
-{!$nav_types}
-   <a href="/admin/types" data-nav="/admin/types"><span class="ic">◲</span> İçerik tipleri</a>
-   <a href="/admin/media" data-nav="/admin/media"><span class="ic">▣</span> Medya</a>
-   <a href="/admin/forms" data-nav="/admin/forms"><span class="ic">✉</span> Form gönderimleri</a>
-{!$ext_nav}
-{#if $nav_manage}   <div class="grp">Yönetim</div>
-{#if $can_users}   <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
-{/if}{#if $can_roles}   <a href="/admin/roles" data-nav="/admin/roles"><span class="ic">◈</span> Roller &amp; Yetkiler</a>
-{/if}{#if $can_settings}   <a href="/admin/menu" data-nav="/admin/menu"><span class="ic">☰</span> Menü</a>
-   <a href="/admin/themes" data-nav="/admin/themes"><span class="ic">◪</span> Temalar</a>
-   <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
-{/if}{/if}  </nav>
+{!$sidebar}
+  </nav>
   <div class="sfoot">
    <div class="who">Giriş: <b>{$nav_user}</b></div>
    <a class="out" href="/" target="_blank">↗ Siteyi gör</a>
@@ -268,7 +309,7 @@
 (function(){
  // ---- visual field builder: edit fields[] without hand-writing JSON ----
  function esc(s){return (s==null?'':(''+s)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
- var FTYPES=['text','textarea','markdown','blocks','int','decimal','bool','date','select','image','relation','category','url','email','number','color','tel'];
+ var FTYPES=['text','textarea','markdown','blocks','int','decimal','bool','date','select','image','gallery','repeater','relation','category','url','email','number','color','tel'];
  document.querySelectorAll('.field-builder').forEach(function(fb){
   var ta=fb.querySelector('textarea'); if(!ta) return;
   var form=fb.closest('form');
@@ -279,7 +320,13 @@
   var add=document.createElement('button'); add.type='button'; add.className='btn-sm'; add.textContent='+ Alan ekle';
   add.addEventListener('click',function(){ rows.push({name:'',label:'',type:'text',required:false}); render(); });
   var adv=document.createElement('button'); adv.type='button'; adv.className='btn-ghost'; adv.textContent='JSON';
-  adv.addEventListener('click',function(){ sync(); ta.style.display=(ta.style.display==='none'?'block':'none'); });
+  adv.addEventListener('click',function(){
+   if(ta.style.display==='none'){ sync(); ta.style.display='block'; }
+   else{ // JSON → görsel: elle düzenlenen JSON'u satırlara geri yükle (geçersizse kal)
+    try{ var p=JSON.parse(ta.value); if(Array.isArray(p)){ rows=p; render(); ta.style.display='none'; } else { alert('Alan JSON\'u bir dizi olmalı.'); } }
+    catch(e){ alert('Geçersiz JSON: '+e.message); }
+   }
+  });
   bar.appendChild(add); bar.appendChild(adv); fb.appendChild(bar);
   function render(){
    ui.innerHTML='';
@@ -297,28 +344,36 @@
   }
   function sync(){
    var out=[];
-   ui.querySelectorAll('.fb-row').forEach(function(d){
+   ui.querySelectorAll('.fb-row').forEach(function(d,i){
     var name=d.querySelector('.fb-name').value.trim(); if(!name) return;
-    var o={name:name,type:d.querySelector('.fb-type').value};
+    // Düzenleme modu: satırın ek anahtarlarını (choices/to/fields/min/max…) KORU —
+    // görsel satır yalnız name/label/type/required'ı düzenler, gerisi JSON görünümünden.
+    var o={}; var src=rows[i]||{};
+    Object.keys(src).forEach(function(k){ if(k!=='name'&&k!=='label'&&k!=='type'&&k!=='required') o[k]=src[k]; });
+    o.name=name; o.type=d.querySelector('.fb-type').value;
     var lbl=d.querySelector('.fb-label').value.trim(); if(lbl) o.label=lbl;
     if(d.querySelector('.fb-reqcb').checked) o.required=true;
     out.push(o);
    });
    ta.value=JSON.stringify(out,null,2);
   }
-  if(form) form.addEventListener('submit',sync);
+  // JSON görünümü açıkken gönderilirse elle yazılan JSON gider (sync ezmez).
+  if(form) form.addEventListener('submit',function(){ if(ta.style.display==='none') sync(); });
   render();
  });
 
  // ---- media picker: shared modal for all image fields ----
  var modal=document.getElementById('mpModal'),grid=document.getElementById('mpGrid'),
-     upload=document.getElementById('mpUpload'),target=null,targetTa=null;
+     upload=document.getElementById('mpUpload'),target=null,targetTa=null,targetCb=null;
  // Görsel FIELD için: input'a url yaz (mevcut davranış).
- function openModal(inp){target=inp;targetTa=null;modal.classList.add('open');loadGrid();}
+ function openModal(inp){target=inp;targetTa=null;targetCb=null;modal.classList.add('open');loadGrid();}
  // Markdown TEXTAREA için: seçilen görseli imlece ![](url) olarak ekle.
- function openModalForTextarea(ta){targetTa=ta;target=null;modal.classList.add('open');loadGrid();}
- function closeModal(){modal.classList.remove('open');target=null;targetTa=null;}
+ function openModalForTextarea(ta){targetTa=ta;target=null;targetCb=null;modal.classList.add('open');loadGrid();}
+ // Blok editörü için: seçilen url'yi bir callback'e ver (input'a yaz / galeriye ekle).
+ function openModalForCallback(fn){targetCb=fn;target=null;targetTa=null;modal.classList.add('open');loadGrid();}
+ function closeModal(){modal.classList.remove('open');target=null;targetTa=null;targetCb=null;}
  function pick(url){
+  if(targetCb){var fn=targetCb;closeModal();fn(url);return;}
   if(targetTa){insertAtCursor(targetTa,'!['+']('+url+')');closeModal();return;}
   if(!target)return;
   target.value=url;
@@ -401,9 +456,10 @@
   ['🖼','Görsel ekle',function(ta){openModalForTextarea(ta);}]
  ];
  // İçerik formundaki markdown/textarea alanlarına araç çubuğu ekle.
- // Seçici: SADECE data-md-form formundaki textarea'lar; SEO açıklaması (seo_desc) hariç.
+ // Seçici: SADECE data-md-form formundaki textarea'lar; SEO açıklaması (seo_desc) ve
+ // blok editörün gizli JSON textarea'sı (.blocks-json / hidden) HARİÇ — onlar markdown değil.
  // Slug/SEO başlığı <input> olduğu için zaten eşleşmez; field-builder ayrı şablonda.
- document.querySelectorAll('form[data-md-form] textarea:not([name="seo_desc"])').forEach(function(ta){
+ document.querySelectorAll('form[data-md-form] textarea:not([name="seo_desc"]):not(.blocks-json):not([hidden])').forEach(function(ta){
   if(ta.dataset.mdReady)return;ta.dataset.mdReady='1';
   var wrapEl=document.createElement('div');wrapEl.className='md-wrap';
   ta.parentNode.insertBefore(wrapEl,ta);
@@ -417,6 +473,231 @@
    bar.appendChild(btn);
   });
   wrapEl.appendChild(bar);wrapEl.appendChild(ta);
+ });
+
+ // ---- görsel blok editörü: blocks[] JSON'unu elle yazmadan düzenle ----
+ // Sunucu contract'ı: her blok {type, data}. data anahtarları renderer'la BİREBİR eşleşmeli.
+ // BE_DEFS: her tip için görünen ad + varsayılan data üreteci.
+ var BE_DEFS={
+  heading:{name:'Başlık',make:function(){return {level:'2',text:''};}},
+  paragraph:{name:'Paragraf',make:function(){return {text:''};}},
+  image:{name:'Görsel',make:function(){return {url:'',alt:'',caption:''};}},
+  gallery:{name:'Galeri',make:function(){return {images:[]};}},
+  button:{name:'Buton',make:function(){return {label:'',url:''};}},
+  quote:{name:'Alıntı',make:function(){return {text:'',cite:''};}},
+  list:{name:'Liste',make:function(){return {items:[]};}},
+  divider:{name:'Ayraç',make:function(){return {};}}
+ };
+ var BE_ORDER=['heading','paragraph','image','gallery','button','quote','list','divider'];
+
+ document.querySelectorAll('.block-editor').forEach(function(be){
+  if(be.dataset.beReady)return; be.dataset.beReady='1';   // tekrar-init koruması
+  var ta=be.querySelector('.blocks-json'); if(!ta) return;
+  var form=be.closest('form');
+  var blocks=[];
+  try{ var parsed=JSON.parse(ta.value); if(Array.isArray(parsed)) blocks=parsed; }catch(e){ blocks=[]; }
+  // Bozuk kayıtları normalize et (type yoksa/data yoksa güvenli varsayılana çek).
+  blocks=blocks.filter(function(b){return b&&BE_DEFS[b.type];}).map(function(b){
+   return {type:b.type,data:(b.data&&typeof b.data==='object')?b.data:{}};
+  });
+
+  var stack=document.createElement('div'); stack.className='be-stack'; be.appendChild(stack);
+
+  // Araç çubuğu: blok ekleme menüsü.
+  var bar=document.createElement('div'); bar.className='be-bar';
+  var addWrap=document.createElement('div'); addWrap.className='be-addwrap';
+  var addBtn=document.createElement('button'); addBtn.type='button'; addBtn.className='btn-sm'; addBtn.textContent='+ Blok ekle';
+  var menu=document.createElement('div'); menu.className='be-menu';
+  BE_ORDER.forEach(function(t){
+   var mb=document.createElement('button'); mb.type='button'; mb.textContent=BE_DEFS[t].name;
+   mb.addEventListener('click',function(){
+    blocks.push({type:t,data:BE_DEFS[t].make()});
+    menu.classList.remove('open'); render(); sync();
+   });
+   menu.appendChild(mb);
+  });
+  addBtn.addEventListener('click',function(e){ e.stopPropagation(); menu.classList.toggle('open'); });
+  document.addEventListener('click',function(e){ if(!addWrap.contains(e.target)) menu.classList.remove('open'); });
+  addWrap.appendChild(addBtn); addWrap.appendChild(menu); bar.appendChild(addWrap); be.appendChild(bar);
+
+  // Hidden textarea'ya JSON yaz + input event (normal form submit persist etsin).
+  function sync(){
+   ta.value=JSON.stringify(blocks);
+   ta.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+
+  // Küçük yardımcılar: data anahtarını inputa bağla.
+  function bindInput(el,b,key){ el.value=(b.data[key]==null?'':b.data[key]); el.addEventListener('input',function(){ b.data[key]=el.value; sync(); }); }
+
+  // Bir blok için gövde alanlarını kur.
+  function buildBody(body,b){
+   if(b.type==='heading'){
+    var row=document.createElement('div'); row.className='blk-row';
+    var sel=document.createElement('select'); sel.className='blk-lvl';
+    [['2','H2'],['3','H3']].forEach(function(o){ var op=document.createElement('option'); op.value=o[0]; op.textContent=o[1]; if((b.data.level||'2')===o[0])op.selected=true; sel.appendChild(op); });
+    sel.addEventListener('change',function(){ b.data.level=sel.value; sync(); });
+    var txt=document.createElement('input'); txt.type='text'; txt.className='blk-grow'; txt.placeholder='Başlık metni'; bindInput(txt,b,'text');
+    row.appendChild(sel); row.appendChild(txt); body.appendChild(row);
+   }else if(b.type==='paragraph'){
+    var pta=document.createElement('textarea'); pta.rows=3; pta.placeholder='Paragraf metni'; bindInput(pta,b,'text'); body.appendChild(pta);
+   }else if(b.type==='image'){
+    var row1=document.createElement('div'); row1.className='blk-row';
+    var url=document.createElement('input'); url.type='text'; url.className='blk-grow'; url.placeholder='Görsel URL'; bindInput(url,b,'url');
+    var pick=document.createElement('button'); pick.type='button'; pick.className='btn-sm'; pick.textContent='Görsel seç';
+    pick.addEventListener('click',function(){ openModalForCallback(function(u){ b.data.url=u; url.value=u; sync(); }); });
+    row1.appendChild(url); row1.appendChild(pick); body.appendChild(row1);
+    var alt=document.createElement('input'); alt.type='text'; alt.placeholder='Alt metin'; bindInput(alt,b,'alt'); body.appendChild(alt);
+    var cap=document.createElement('input'); cap.type='text'; cap.placeholder='Açıklama (caption)'; bindInput(cap,b,'caption'); body.appendChild(cap);
+   }else if(b.type==='gallery'){
+    if(!Array.isArray(b.data.images)) b.data.images=[];
+    var subs=document.createElement('div'); subs.className='blk-subs';
+    function drawGallery(){
+     subs.innerHTML='';
+     b.data.images.forEach(function(u,idx){
+      var sub=document.createElement('div'); sub.className='blk-sub';
+      var im=document.createElement('img'); im.src=u; im.alt='';
+      var inp=document.createElement('input'); inp.type='text'; inp.value=u; inp.placeholder='Görsel URL';
+      inp.addEventListener('input',function(){ b.data.images[idx]=inp.value; im.src=inp.value; sync(); });
+      var rm=document.createElement('button'); rm.type='button'; rm.className='del btn-sm'; rm.textContent='Sil';
+      rm.addEventListener('click',function(){ b.data.images.splice(idx,1); drawGallery(); sync(); });
+      sub.appendChild(im); sub.appendChild(inp); sub.appendChild(rm); subs.appendChild(sub);
+     });
+    }
+    var add=document.createElement('button'); add.type='button'; add.className='btn-sm'; add.textContent='+ Görsel ekle';
+    add.addEventListener('click',function(){ openModalForCallback(function(u){ b.data.images.push(u); drawGallery(); sync(); }); });
+    body.appendChild(subs); body.appendChild(add); drawGallery();
+   }else if(b.type==='button'){
+    var lbl=document.createElement('input'); lbl.type='text'; lbl.placeholder='Buton etiketi'; bindInput(lbl,b,'label'); body.appendChild(lbl);
+    var bu=document.createElement('input'); bu.type='text'; bu.placeholder='URL'; bindInput(bu,b,'url'); body.appendChild(bu);
+   }else if(b.type==='quote'){
+    var qt=document.createElement('textarea'); qt.rows=2; qt.placeholder='Alıntı metni'; bindInput(qt,b,'text'); body.appendChild(qt);
+    var ci=document.createElement('input'); ci.type='text'; ci.placeholder='Kaynak (cite)'; bindInput(ci,b,'cite'); body.appendChild(ci);
+   }else if(b.type==='list'){
+    if(!Array.isArray(b.data.items)) b.data.items=[];
+    var lsubs=document.createElement('div'); lsubs.className='blk-subs';
+    function drawList(){
+     lsubs.innerHTML='';
+     b.data.items.forEach(function(it,idx){
+      var sub=document.createElement('div'); sub.className='blk-sub';
+      var inp=document.createElement('input'); inp.type='text'; inp.value=it; inp.placeholder='Madde';
+      inp.addEventListener('input',function(){ b.data.items[idx]=inp.value; sync(); });
+      var rm=document.createElement('button'); rm.type='button'; rm.className='del btn-sm'; rm.textContent='Sil';
+      rm.addEventListener('click',function(){ b.data.items.splice(idx,1); drawList(); sync(); });
+      sub.appendChild(inp); sub.appendChild(rm); lsubs.appendChild(sub);
+     });
+    }
+    var ladd=document.createElement('button'); ladd.type='button'; ladd.className='btn-sm'; ladd.textContent='+ Madde ekle';
+    ladd.addEventListener('click',function(){ b.data.items.push(''); drawList(); sync(); });
+    body.appendChild(lsubs); body.appendChild(ladd); drawList();
+   }else if(b.type==='divider'){
+    var hr=document.createElement('div'); hr.className='muted'; hr.style.fontSize='13px'; hr.textContent='— Ayraç (alan yok) —';
+    body.appendChild(hr);
+   }
+  }
+
+  function render(){
+   stack.innerHTML='';
+   if(!blocks.length){ var em=document.createElement('div'); em.className='be-empty'; em.textContent='Henüz blok yok. "Blok ekle" ile başlayın.'; stack.appendChild(em); return; }
+   blocks.forEach(function(b,i){
+    var card=document.createElement('div'); card.className='blk-card';
+    var head=document.createElement('div'); head.className='blk-head';
+    var kind=document.createElement('span'); kind.className='blk-kind'; kind.textContent=(BE_DEFS[b.type]?BE_DEFS[b.type].name:b.type);
+    var sp=document.createElement('span'); sp.className='spacer';
+    var up=document.createElement('button'); up.type='button'; up.className='blk-tool'; up.title='Yukarı'; up.textContent='↑'; up.disabled=(i===0);
+    up.addEventListener('click',function(){ if(i===0)return; var t=blocks[i-1]; blocks[i-1]=blocks[i]; blocks[i]=t; render(); sync(); });
+    var dn=document.createElement('button'); dn.type='button'; dn.className='blk-tool'; dn.title='Aşağı'; dn.textContent='↓'; dn.disabled=(i===blocks.length-1);
+    dn.addEventListener('click',function(){ if(i===blocks.length-1)return; var t=blocks[i+1]; blocks[i+1]=blocks[i]; blocks[i]=t; render(); sync(); });
+    var del=document.createElement('button'); del.type='button'; del.className='blk-tool blk-del'; del.title='Sil'; del.textContent='×';
+    del.addEventListener('click',function(){ blocks.splice(i,1); render(); sync(); });
+    head.appendChild(kind); head.appendChild(sp); head.appendChild(up); head.appendChild(dn); head.appendChild(del);
+    var body=document.createElement('div'); body.className='blk-body';
+    buildBody(body,b);
+    card.appendChild(head); card.appendChild(body); stack.appendChild(card);
+   });
+  }
+
+  // Güvenlik ağı: submit anında da senkronla (input event kaçmışsa).
+  if(form) form.addEventListener('submit',sync);
+  render(); sync();
+ });
+
+ // ---- gallery / repeater alan editörü (.multi-editor) ----
+ // Gizli textarea JSON dizisini taşır. gallery: ["url", …]; repeater: [{alt_alan: değer}, …]
+ // (alt alanlar data-fields ile gelir). Satır ekle/sil; her değişimde geri serileştirir.
+ document.querySelectorAll('.multi-editor').forEach(function(me){
+  if(me.dataset.meReady)return; me.dataset.meReady='1';   // tekrar-init koruması
+  var ta=me.querySelector('.multi-json'); if(!ta) return;
+  var kind=me.dataset.kind||'gallery';
+  var form=me.closest('form');
+  var subs=[]; try{ var sp=JSON.parse(me.dataset.fields||'[]'); if(Array.isArray(sp)) subs=sp; }catch(e){ subs=[]; }
+  subs=subs.filter(function(s){ return s&&s.name; });
+  var rows=[]; try{ var p=JSON.parse(ta.value); if(Array.isArray(p)) rows=p; }catch(e){ rows=[]; }
+  if(kind==='gallery') rows=rows.map(function(r){ return (typeof r==='string')?r:(r&&r.url?r.url:''); });
+  else rows=rows.map(function(r){ return (r&&typeof r==='object'&&!Array.isArray(r))?r:{}; });
+  var list=document.createElement('div'); list.className='me-rows'; me.appendChild(list);
+  var bar=document.createElement('div'); bar.className='me-bar'; me.appendChild(bar);
+  function sync(){ ta.value=JSON.stringify(rows); }
+  function subInput(s,row){
+   var t=s.type||'text', el;
+   if(t==='textarea'||t==='markdown'){ el=document.createElement('textarea'); el.rows=2; }
+   else if(t==='select'){ el=document.createElement('select'); (s.choices||[]).forEach(function(c){ var o=document.createElement('option'); o.value=c; o.textContent=c; el.appendChild(o); }); }
+   else if(t==='bool'){ el=document.createElement('select'); [['0','Hayır'],['1','Evet']].forEach(function(c){ var o=document.createElement('option'); o.value=c[0]; o.textContent=c[1]; el.appendChild(o); }); }
+   else { el=document.createElement('input'); el.type=(t==='int'||t==='decimal'||t==='number')?'number':(t==='date'?'date':'text'); if(t==='decimal'||t==='number') el.step='any'; }
+   el.value=(row[s.name]==null?'':row[s.name]);
+   el.addEventListener('input',function(){ row[s.name]=el.value; sync(); });
+   el.addEventListener('change',function(){ row[s.name]=el.value; sync(); });
+   return el;
+  }
+  function render(){
+   list.innerHTML='';
+   if(!rows.length){ var em=document.createElement('div'); em.className='me-empty'; em.textContent=(kind==='gallery'?'Henüz görsel yok.':'Henüz satır yok.'); list.appendChild(em); }
+   rows.forEach(function(r,i){
+    var d=document.createElement('div'); d.className='me-row';
+    var ix=document.createElement('span'); ix.className='me-idx'; ix.textContent=(i+1)+'.'; d.appendChild(ix);
+    if(kind==='gallery'){
+     var im=document.createElement('img'); im.alt=''; im.src=r||''; if(!r) im.style.visibility='hidden'; d.appendChild(im);
+     var inp=document.createElement('input'); inp.type='text'; inp.value=r; inp.placeholder='/media/… veya bir URL';
+     inp.addEventListener('input',function(){ rows[i]=inp.value; im.src=inp.value; im.style.visibility=inp.value?'visible':'hidden'; sync(); });
+     d.appendChild(inp);
+     var pk=document.createElement('button'); pk.type='button'; pk.className='btn-sm'; pk.textContent='Görsel seç';
+     pk.addEventListener('click',function(){ openModalForCallback(function(u){ rows[i]=u; inp.value=u; im.src=u; im.style.visibility='visible'; sync(); }); });
+     d.appendChild(pk);
+    } else {
+     if(!subs.length){ var w=document.createElement('div'); w.className='me-sub'; w.textContent='Bu tekrarlayıcı alanın "fields" alt tanımı yok (Modül Yönetimi → JSON).'; d.appendChild(w); }
+     subs.forEach(function(s){
+      var w=document.createElement('label'); w.className='me-sub'; w.textContent=(s.label||s.name);
+      var el=subInput(s,r); if(s.type==='image'){
+       var ir=document.createElement('div'); ir.style.display='flex'; ir.style.gap='6px'; ir.appendChild(el);
+       var ipk=document.createElement('button'); ipk.type='button'; ipk.className='btn-sm'; ipk.textContent='Seç';
+       ipk.addEventListener('click',function(){ openModalForCallback(function(u){ r[s.name]=u; el.value=u; sync(); }); });
+       ir.appendChild(ipk); w.appendChild(ir);
+      } else { w.appendChild(el); }
+      d.appendChild(w);
+     });
+    }
+    var up=document.createElement('button'); up.type='button'; up.className='blk-tool'; up.title='Yukarı'; up.textContent='↑'; up.disabled=(i===0);
+    up.addEventListener('click',function(){ if(i===0)return; var t=rows[i-1]; rows[i-1]=rows[i]; rows[i]=t; render(); sync(); });
+    var dn=document.createElement('button'); dn.type='button'; dn.className='blk-tool'; dn.title='Aşağı'; dn.textContent='↓'; dn.disabled=(i===rows.length-1);
+    dn.addEventListener('click',function(){ if(i===rows.length-1)return; var t=rows[i+1]; rows[i+1]=rows[i]; rows[i]=t; render(); sync(); });
+    var rm=document.createElement('button'); rm.type='button'; rm.className='del btn-sm'; rm.textContent='Sil';
+    rm.addEventListener('click',function(){ rows.splice(i,1); render(); sync(); });
+    d.appendChild(up); d.appendChild(dn); d.appendChild(rm);
+    list.appendChild(d);
+   });
+  }
+  var add=document.createElement('button'); add.type='button'; add.className='btn-sm'; add.textContent=(kind==='gallery'?'+ Görsel ekle':'+ Satır ekle');
+  add.addEventListener('click',function(){
+   if(kind==='gallery'){ openModalForCallback(function(u){ rows.push(u); render(); sync(); }); }
+   else { var o={}; subs.forEach(function(s){ o[s.name]=''; }); rows.push(o); render(); sync(); }
+  });
+  bar.appendChild(add);
+  if(kind==='gallery'){
+   var addUrl=document.createElement('button'); addUrl.type='button'; addUrl.className='btn-ghost'; addUrl.textContent='+ URL ile';
+   addUrl.addEventListener('click',function(){ rows.push(''); render(); sync(); });
+   bar.appendChild(addUrl);
+  }
+  if(form) form.addEventListener('submit',sync);   // güvenlik ağı
+  render(); sync();
  });
 
  var b=document.getElementById('burger'),bd=document.getElementById('backdrop');

@@ -37,11 +37,210 @@ function type_for_base($c, $base) { return type_for_pattern($c, $base . "/{slug}
 
 // ── type engine: load a type + its field defs ───────────────────────────────
 function load_type($c, $slug) {
-    $rows = db::query($c, "SELECT slug, label, url_pattern, fields_json FROM content_types WHERE slug = ?", [$slug]);
+    $rows = db::query($c, "SELECT slug, label, url_pattern, fields_json, config_json FROM content_types WHERE slug = ?", [$slug]);
     if (count($rows) == 0) { return null; }
     $t = $rows[0];
     $t["fields"] = json::decode($t["fields_json"]);
+    if ($t["fields"] == null) { $t["fields"] = []; }
+    $t["config"] = type_config_decode($t["slug"], $t["label"], $t["config_json"]);
     return $t;
+}
+
+// ── module config (config_json) → tam bir assoc, her anahtar varsayılanlı ─────
+// Sidebar grupları (spec "Admin IA"): anahtar → Türkçe etiket, sabit sıra.
+function module_groups() {
+    return [
+        ["key" => "kurumsal",  "label" => "Kurumsal"],
+        ["key" => "icerik",    "label" => "İçerik Yönetimleri"],
+        ["key" => "iletisim",  "label" => "İletişim"],
+        ["key" => "ecommerce", "label" => "E-Ticaret"],
+        ["key" => "ayarlar",   "label" => "Ayarlar"],
+        ["key" => "kullanici", "label" => "Kullanıcı Yönetimi"]
+    ];
+}
+// Grup anahtarı → Türkçe etiket (bilinmeyen anahtar aynen döner).
+function module_group_label($key) {
+    foreach (module_groups() as $g) { if ($g["key"] == $key) { return $g["label"]; } }
+    return $key;
+}
+function module_group_keys() {
+    $k = [];
+    foreach (module_groups() as $g) { $k = array::push($k, $g["key"]); }
+    return $k;
+}
+// "a, b ,c" → ["a","b","c"] (boşlar atılır). Liste verilirse aynen (string'e çevrilerek) döner.
+function csv_list($v) {
+    $out = [];
+    if ($v == null) { return $out; }
+    if (type::is_array($v)) {
+        foreach ($v as $x) { $s = string::trim(type::to_string($x)); if ($s != "") { $out = array::push($out, $s); } }
+        return $out;
+    }
+    foreach (string::split(type::to_string($v), ",") as $p) {
+        $s = string::trim($p); if ($s != "") { $out = array::push($out, $s); }
+    }
+    return $out;
+}
+// json::decode edilmiş bir assoc'tan string anahtar oku; yoksa/boşsa varsayılan.
+// (assoc'ta olmayan anahtar null döner — throw etmez.)
+function cfg_str($cfg, $key, $default) {
+    if ($cfg == null) { return $default; }
+    $v = $cfg[$key];
+    if ($v == null) { return $default; }
+    $s = string::trim(type::to_string($v));
+    if ($s == "") { return $default; }
+    return $s;
+}
+function type_config_defaults($slug, $label) {
+    $lbl = $label; if ($lbl == null || $lbl == "") { $lbl = $slug; }
+    return ["group" => "icerik", "icon" => "📄", "singular" => $lbl, "plural" => $lbl,
+            "list_columns" => ["title", "status", "updated_at"], "filters" => ["status"],
+            "order" => 100, "public" => true];
+}
+function type_config_decode($slug, $label, $json) {
+    $d = type_config_defaults($slug, $label);
+    if ($json == null || $json == "" || $json == "null") { return $d; }
+    $cfg = json::decode($json);
+    if ($cfg == null) { return $d; }
+    $grp = cfg_str($cfg, "group", $d["group"]);
+    if (!array::contains(module_group_keys(), $grp)) { $grp = $d["group"]; }
+    $d["group"]    = $grp;
+    $d["icon"]     = cfg_str($cfg, "icon", $d["icon"]);
+    $d["singular"] = cfg_str($cfg, "singular", $d["singular"]);
+    $d["plural"]   = cfg_str($cfg, "plural", $d["plural"]);
+    $cols = csv_list($cfg["list_columns"]); if (count($cols) > 0) { $d["list_columns"] = $cols; }
+    if ($cfg["filters"] != null) { $d["filters"] = csv_list($cfg["filters"]); }
+    $ord = $cfg["order"]; if ($ord != null) { $d["order"] = type::to_int($ord); }
+    $pv = $cfg["public"];
+    if ($pv != null) {
+        $ps = type::to_string($pv);
+        if ($ps == "0" || $ps == "false" || $ps == "") { $d["public"] = false; }
+    }
+    return $d;
+}
+// Bir tipin alan tanımını ada göre bul (yoksa null).
+function type_field_def($fields, $name) {
+    if ($fields == null) { return null; }
+    foreach ($fields as $f) { if ($f["name"] == $name) { return $f; } }
+    return null;
+}
+// Alan etiketi: "label" varsa o, yoksa alan adı.
+function field_label($f) {
+    $l = $f["label"];
+    if ($l == null || $l == "") { return $f["name"]; }
+    return $l;
+}
+
+// ── dinamik liste yardımcıları (GET /admin/type/{type}) ──────────────────────
+// Kolon başlığı: yerleşik kolonlar Türkçe, alan kolonları field label'ı.
+function list_col_label($t, $col) {
+    if ($col == "title") { return "Başlık"; }
+    if ($col == "status") { return "Durum"; }
+    if ($col == "updated_at") { return "Güncellenme"; }
+    if ($col == "lang") { return "Dil"; }
+    if ($col == "slug") { return "Slug"; }
+    $f = type_field_def($t["fields"], $col);
+    if ($f == null) { return $col; }
+    return field_label($f);
+}
+// Bir satırın (content + revision) hücrelerini config.list_columns sırasıyla üret.
+// Alan değerleri revisions.fields_json'dan (satır başına bir decode, ek sorgu YOK).
+// Hücre: {kind: title|image|text, value}. gallery/repeater/blocks → öğe sayısı.
+function list_row_cells($t, $row) {
+    $vals = json::decode($row["fields_json"]);
+    $cells = [];
+    foreach ($t["config"]["list_columns"] as $col) {
+        $kind = "text"; $v = "";
+        if ($col == "title") { $kind = "title"; $v = $row["title"]; }
+        else { if ($col == "status") { $v = $row["status"]; }
+        else { if ($col == "updated_at") { $v = $row["updated_at"]; }
+        else { if ($col == "lang") { $v = $row["lang"]; }
+        else { if ($col == "slug") { $v = $row["slug"]; }
+        else {
+            if ($vals != null) { $v = $vals[$col]; }
+            if ($v == null) { $v = ""; }
+            $f = type_field_def($t["fields"], $col);
+            $ft = ""; if ($f != null) { $ft = $f["type"]; if ($ft == null) { $ft = ""; } }
+            if ($ft == "image" || $col == "image") { $kind = "image"; }
+            if ($ft == "gallery" || $ft == "repeater" || $ft == "blocks") {
+                $n = 0;
+                if (type::is_array($v)) { $n = count($v); }
+                else { if ($v != "") { $arr = json::decode($v); if ($arr != null && type::is_array($arr)) { $n = count($arr); } } }
+                $v = $n . " öğe";
+            }
+            if (type::is_array($v)) { $v = json::encode($v); }
+            $v = type::to_string($v);
+            if ($kind == "text" && string::len($v) > 60) { $v = string::substr($v, 0, 57) . "…"; }
+        } } } } }
+        if ($v == null) { $v = ""; }
+        $cells = array::push($cells, ["value" => $v, "is_image" => ($kind == "image"), "is_title" => ($kind == "title"), "is_text" => ($kind == "text")]);
+    }
+    return $cells;
+}
+// config.filters → filtre kontrol tanımları. status → sabit select; select/relation/
+// category alanı → seçenek listesi (relation: hedef tipin başlıkları; category: bu
+// tipin kayıtlarındaki farklı değerler); diğerleri → "içerir" metin kutusu.
+// Aktif değer $active[name]'den okunur (assoc; yoksa "").
+function list_filter_defs($c, $t, $active) {
+    $defs = [];
+    foreach ($t["config"]["filters"] as $fname) {
+        $cur = $active[$fname]; if ($cur == null) { $cur = ""; }
+        $d = ["name" => $fname, "label" => list_col_label($t, $fname), "value" => $cur, "is_select" => false, "options" => []];
+        if ($fname == "status") {
+            $d["is_select"] = true;
+            $d["options"] = [["value" => "published", "label" => "Yayında", "selected" => ($cur == "published")],
+                             ["value" => "draft",     "label" => "Taslak",  "selected" => ($cur == "draft")]];
+            $defs = array::push($defs, $d); continue;
+        }
+        $f = type_field_def($t["fields"], $fname);
+        $ft = ""; if ($f != null) { $ft = $f["type"]; if ($ft == null) { $ft = ""; } }
+        if ($ft == "select" || $ft == "relation" || $ft == "category") {
+            $d["is_select"] = true;
+            $opts = [];
+            if ($ft == "select") {
+                $chs = $f["choices"]; if ($chs == null) { $chs = []; }
+                foreach ($chs as $ch) { $opts = array::push($opts, ["value" => $ch, "label" => $ch, "selected" => ($cur == $ch)]); }
+            } else { if ($ft == "relation") {
+                $rows = db::query($c, "SELECT c.id, r.title FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? ORDER BY r.title", [$f["to"]]);
+                foreach ($rows as $r) { $iv = type::to_string($r["id"]); $opts = array::push($opts, ["value" => $iv, "label" => $r["title"], "selected" => ($cur == $iv)]); }
+            } else {
+                // alan adı tanımdan gelir (admin tarafından yazılmış, [a-z0-9_]); yine de
+                // JSON path'e sadece güvenli karakterlerle girsin
+                $safe = $fname;
+                if (!string::regex_match($safe, "^[A-Za-z0-9_]+$")) { $safe = "category"; }
+                $rows = db::query($c, "SELECT DISTINCT json_extract(r.fields_json, '$." . $safe . "') AS v FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? AND json_extract(r.fields_json, '$." . $safe . "') IS NOT NULL AND json_extract(r.fields_json, '$." . $safe . "') != '' ORDER BY 1", [$t["slug"]]);
+                foreach ($rows as $r) { $iv = type::to_string($r["v"]); $opts = array::push($opts, ["value" => $iv, "label" => $iv, "selected" => ($cur == $iv)]); }
+            } }
+            $d["options"] = $opts;
+        }
+        $defs = array::push($defs, $d);
+    }
+    return $defs;
+}
+// Filtre WHERE parçası: status → c.status; alan → json_extract(r.fields_json,'$.f')
+// (select/relation/category: tam eşleşme; diğer: LIKE %v%). Alan adı güvenli-karakter
+// kontrolünden geçmezse filtre atlanır. Döner: ["sql" => " AND …", "params" => [...]].
+function list_filter_where($t, $active) {
+    $sql = ""; $params = [];
+    foreach ($t["config"]["filters"] as $fname) {
+        $cur = $active[$fname]; if ($cur == null) { $cur = ""; }
+        $cur = string::trim(type::to_string($cur));
+        if ($cur == "") { continue; }
+        if ($fname == "status") {
+            if ($cur == "draft" || $cur == "published") { $sql = $sql . " AND c.status = ?"; $params = array::push($params, $cur); }
+            continue;
+        }
+        if (!string::regex_match($fname, "^[A-Za-z0-9_]+$")) { continue; }
+        $f = type_field_def($t["fields"], $fname);
+        $ft = ""; if ($f != null) { $ft = $f["type"]; if ($ft == null) { $ft = ""; } }
+        $expr = "json_extract(r.fields_json, '$." . $fname . "')";
+        if ($ft == "select" || $ft == "relation" || $ft == "category") {
+            $sql = $sql . " AND " . $expr . " = ?"; $params = array::push($params, $cur);
+        } else {
+            $sql = $sql . " AND " . $expr . " LIKE ?"; $params = array::push($params, "%" . $cur . "%");
+        }
+    }
+    return ["sql" => $sql, "params" => $params];
 }
 
 // Render one field's input HTML from its definition (+ current value).
@@ -80,6 +279,16 @@ function field_input($c, $f, $value) {
     }
     if ($t == "tel") {
         return "<label>" . $name . "<input type=\"tel\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "gallery" || $t == "repeater") {
+        // Çoklu-satır alanları: gizli bir textarea JSON dizisini taşır; layout.html'deki
+        // .multi-editor JS'i satır ekle/sil arayüzünü kurar ve her değişimde geri
+        // serileştirir (blocks/field-builder ile aynı JSON-in-textarea kalıbı).
+        // repeater: alt alan tanımları ("fields") data-fields ile JS'e geçer.
+        $sub = "[]";
+        if ($t == "repeater") { $sf = $f["fields"]; if ($sf != null) { $sub = json::encode($sf); } }
+        $jv = $v; if ($value == null || $value == "") { $jv = "[]"; }
+        return "<div class=\"field-block\"><span class=\"fb-label\">" . html::escape(field_label($f)) . "</span><div class=\"multi-editor\" data-kind=\"" . $t . "\" data-field=\"" . $name . "\" data-fields=\"" . html::escape($sub) . "\"><textarea name=\"" . $name . "\" class=\"multi-json\" hidden>" . $jv . "</textarea></div></div>";
     }
     if ($t == "blocks") {
         // Visual block editor: a hidden textarea holds the block list as JSON; the JS in
@@ -169,6 +378,11 @@ function validate_post($c, $fields) {
                     try { if ($f["max"] != null && $f["max"] != "") { $has_max = true; $maxv = type::to_float($f["max"]); } } catch ($e) { $has_max = false; }
                     if ($has_max && $nv > $maxv) { $errors = array::push($errors, $name . " must be <= " . $f["max"]); }
                 }
+            }
+            if (($t == "gallery" || $t == "repeater") && $raw != "") {
+                $arr = json::decode($raw);
+                if (!type::is_array($arr)) { $errors = array::push($errors, $name . " must be a JSON array"); }
+                else { if ($req && count($arr) == 0) { $errors = array::push($errors, $name . " is required"); } }
             }
             if ($t == "select" && $raw != "") {
                 $ok = false; foreach ($f["choices"] as $ch) { if ($ch == $raw) { $ok = true; } }

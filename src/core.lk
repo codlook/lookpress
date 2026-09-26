@@ -131,19 +131,110 @@ function admin_chrome($data) {
     $data["can_settings"] = can("settings");
     $data["nav_manage"] = (can("users") || can("roles") || can("settings"));
     $data["ext_nav"] = xp_admin_nav(["super" => is_super()]);
-    // Dynamic "İçerik Yönetimi" nav: one entry per content type (haberler, blog,
-    // duyurular … appear automatically as they're created), minus types an
-    // extension manages in its own group (commerce → product).
     $c = conn();
-    $hidden = xp_hidden_types();
-    $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
-    $nt = "";
-    foreach ($types as $t) {
-        if (array::contains($hidden, $t["slug"])) { continue; }
-        $nt = $nt . "<a href=\"/admin/type/" . $t["slug"] . "\" data-nav=\"/admin/type/" . $t["slug"] . "\"><span class=\"ic\">▦</span> " . html::escape($t["label"]) . "</a>";
-    }
-    $data["nav_types"] = $nt;
+    // Dynamic sidebar: the whole nav, grouped per the spec Admin IA from module config.
+    $data["sidebar"] = admin_sidebar($c, $data["ext_nav"]);
+    // Geriye uyumluluk: eski şablonlar {!$nav_types} basıyor olabilir (uzantı görünümleri).
+    $data["nav_types"] = admin_nav_types($c);
     return $data;
+}
+// Tek bir nav bağlantısı.
+function nav_link($href, $icon, $label) {
+    return "<a href=\"" . html::escape($href) . "\" data-nav=\"" . html::escape($href) . "\"><span class=\"ic\">" . html::escape($icon) . "</span> " . html::escape($label) . "</a>";
+}
+// Modüller (content_types) — gizli olmayanlar, config ile; grup içi sıra: order, plural.
+function admin_nav_modules($c) {
+    $hidden = xp_hidden_types();
+    $rows = db::query($c, "SELECT slug, label, config_json FROM content_types ORDER BY label", []);
+    $mods = [];
+    foreach ($rows as $r) {
+        if (array::contains($hidden, $r["slug"])) { continue; }
+        $cfg = type_config_decode($r["slug"], $r["label"], $r["config_json"]);
+        $mods = array::push($mods, ["slug" => $r["slug"], "cfg" => $cfg]);
+    }
+    return $mods;
+}
+// Bir grubun modül bağlantıları (order'a göre sıralı; eşitlikte plural).
+function admin_nav_group_modules($mods, $group) {
+    $in = [];
+    foreach ($mods as $m) { if ($m["cfg"]["group"] == $group) { $in = array::push($in, $m); } }
+    // küçük liste: seçmeli sıralama (order, sonra plural)
+    $sorted = [];
+    $remaining = $in;
+    while (count($remaining) > 0) {
+        $best = null; $bi = -1; $i = 0;
+        foreach ($remaining as $m) {
+            $take = false;
+            if ($best == null) { $take = true; }
+            else {
+                $mo = $m["cfg"]["order"]; $bo = $best["cfg"]["order"];
+                if ($mo < $bo || ($mo == $bo && $m["cfg"]["plural"] < $best["cfg"]["plural"])) { $take = true; }
+            }
+            if ($take) { $best = $m; $bi = $i; }
+            $i = $i + 1;
+        }
+        $sorted = array::push($sorted, $best);
+        $rest = []; $i = 0;
+        foreach ($remaining as $m) { if ($i != $bi) { $rest = array::push($rest, $m); } $i = $i + 1; }
+        $remaining = $rest;
+    }
+    $h = "";
+    foreach ($sorted as $m) { $h = $h . nav_link("/admin/type/" . $m["slug"], $m["cfg"]["icon"], $m["cfg"]["plural"]); }
+    return $h;
+}
+// Eski düz liste (geriye uyumluluk için {!$nav_types}).
+function admin_nav_types($c) {
+    $h = "";
+    foreach (admin_nav_modules($c) as $m) { $h = $h . nav_link("/admin/type/" . $m["slug"], "▦", $m["cfg"]["plural"]); }
+    return $h;
+}
+// ── dynamic sidebar ───────────────────────────────────────────────────────────
+// The whole admin nav HTML, grouped per the spec Admin IA (kurumsal / icerik /
+// iletisim / ecommerce / ayarlar / kullanici), modules ordered by config.order and
+// shown with config.icon + config.plural; empty groups are hidden. Fixed entries
+// keep the exact permission gates the former static sidebar had (settings/users/
+// roles). Extension nav (xp_admin_nav) is injected inside the ecommerce group.
+function admin_sidebar($c, $ext_nav) {
+    $mods = admin_nav_modules($c);
+    $can_users = can("users"); $can_roles = can("roles"); $can_settings = can("settings");
+    $h = nav_link("/admin", "▤", "Panel");
+    foreach (module_groups() as $g) {
+        $key = $g["key"];
+        $items = admin_nav_group_modules($mods, $key);
+        if ($key == "icerik") {
+            $items = $items . nav_link("/admin/media", "▣", "Medya");
+        }
+        if ($key == "iletisim") {
+            $items = $items . nav_link("/admin/forms", "✉", "Formlar");
+        }
+        if ($key == "ecommerce" && $ext_nav != null && $ext_nav != "") {
+            // Uzantı kendi grup başlığıyla gelir (commerce → "Ticaret"); bu grupta zaten
+            // modül varsa başlığı çıkar, yoksa uzantının başlığı grubun başlığı olur.
+            $x = $ext_nav;
+            if ($items != "" && string::starts_with($x, "<div class=\"grp\">")) {
+                $end = string::index_of($x, "</div>");
+                if ($end >= 0) { $x = string::substr($x, $end + 6); }
+            }
+            if ($items == "") { $h = $h . $x; continue; }
+            $items = $items . $x;
+        }
+        if ($key == "ayarlar") {
+            if ($can_settings) {
+                $items = $items . nav_link("/admin/settings", "⚙", "Genel Ayarlar")
+                                . nav_link("/admin/themes", "◪", "Tema")
+                                . nav_link("/admin/menu", "☰", "Menü");
+            }
+            if (can("types")) { $items = $items . nav_link("/admin/types", "◲", "Modül Yönetimi"); }
+        }
+        if ($key == "kullanici") {
+            if ($can_users) { $items = $items . nav_link("/admin/users", "◍", "Adminler"); }
+            if ($can_roles) { $items = $items . nav_link("/admin/roles", "◈", "Roller"); }
+            if ($can_users) { $items = $items . nav_link("/admin/uyeler", "☺", "Üyeler"); }
+        }
+        if ($items == "") { continue; }
+        $h = $h . "<div class=\"grp\">" . html::escape($g["label"]) . "</div>" . $items;
+    }
+    return $h;
 }
 // Admin has its OWN UI, independent of the active site theme (views/admin/) — a
 // theme ships only public views, so the theme ecosystem stays light.

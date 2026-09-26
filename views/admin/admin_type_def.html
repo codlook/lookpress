@@ -1,13 +1,24 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<h2>New content type <a class="btn" href="/admin">Types</a></h2>
+<div class="section-head">{#if $is_edit}<h2>Modülü düzenle: {$label}</h2>{/if}{#if !$is_edit}<h2>Yeni modül</h2>{/if}<a class="btn" href="/admin/types">Modül Yönetimi</a></div>
 {#each $errors as $e}<p class="error">{$e}</p>{/each}
-<form method="post" action="/admin/types/new">
-<label>Slug (used in code + URLs) <input name="slug" value="{$slug}" placeholder="recipe" required></label>
-<label>Label <input name="label" value="{$label}" placeholder="Recipe" required></label>
-<label>URL pattern (must contain <code>{slug}</code>) <input name="url_pattern" value="{$url_pattern}" placeholder="/recipes/{slug}" required></label>
-<div class="field-builder"><label>Alanlar (title + body zorunlu)</label><textarea name="fields" rows="12">{$fields}</textarea></div>
-<button type="submit">Create type</button>
+<form method="post" action="/admin/types/new" class="type-def">
+<input type="hidden" name="edit_slug" value="{$edit_slug}">
+<div class="grid2">
+ <label>Slug (kod + URL'de kullanılır){#if $is_edit} <span class="muted">— değiştirilemez</span>{/if} <input name="slug" value="{$slug}" placeholder="haber" required{#if $is_edit} readonly{/if}></label>
+ <label>Etiket <input name="label" value="{$label}" placeholder="Haberler" required></label>
+ <label>Tekil ad <input name="singular" value="{$singular}" placeholder="Haber"></label>
+ <label>Çoğul ad (menüde görünür) <input name="plural" value="{$plural}" placeholder="Haberler"></label>
+ <label>URL deseni (<code>{slug}</code> içermeli; <b>boş = public sayfa yok</b>) <input name="url_pattern" value="{$url_pattern}" placeholder="/haber/{slug}"></label>
+ <label>Menü grubu <select name="group">{#each $groups as $g}<option value="{$g.key}"{#if $g.selected} selected{/if}>{$g.label}</option>{/each}</select></label>
+ <label>İkon (emoji / karakter) <input name="icon" value="{$icon}" placeholder="📰" maxlength="8"></label>
+ <label>Sıra (grup içi; küçük önce) <input type="number" name="order" value="{$order}"></label>
+ <label>Liste kolonları (virgülle; alan adları + title/status/updated_at/lang/slug) <input name="list_columns" value="{$list_columns}" placeholder="title, status, updated_at"></label>
+ <label>Filtreler (virgülle; status + alan adları) <input name="filters" value="{$filters}" placeholder="status, category"></label>
+</div>
+<label class="cb"><input type="checkbox" name="public" value="1"{#if $public} checked{/if}> Public (site tarafında sayfa/listeleme var)</label>
+<div class="field-builder"><label>Alanlar (<code>title</code> zorunlu; <code>body</code> isteğe bağlı)</label><textarea name="fields" rows="12">{$fields}</textarea></div>
+{#if $is_edit}<button type="submit">Kaydet</button>{/if}{#if !$is_edit}<button type="submit">Modülü oluştur</button>{/if}
 </form>
-<p class="muted">Field types: text · textarea · markdown · int · decimal · bool · date · select (with <code>choices</code>) · relation (with <code>to</code>).</p>
+<p class="muted">Alan tipleri: text · textarea · markdown · blocks · int · decimal · number · bool · date · select (<code>choices</code>) · image · gallery · repeater (<code>fields</code>: alt alan listesi) · relation (<code>to</code>) · category · url · email · tel · color. <code>choices</code>/<code>to</code>/<code>fields</code> gibi ek anahtarlar JSON görünümünden düzenlenir.</p>
 {/block}

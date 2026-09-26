@@ -1,30 +1,28 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>{$type.label} <span class="muted">({$count})</span></h2><a class="btn" href="/admin/type/{$type.slug}/new">+ Yeni</a></div>
+<div class="section-head"><h2>{$type.config.icon} {$type.config.plural} <span class="muted">({$count})</span></h2><a class="btn" href="/admin/type/{$type.slug}/new">+ Yeni {$type.config.singular}</a></div>
 <form method="get" action="/admin/type/{$type.slug}" class="list-filter">
   <input type="search" name="q" value="{$q}" placeholder="Başlıkta ara…">
-  <select name="status">
-    <option value=""{#if $status_all} selected{/if}>Tüm durumlar</option>
-    <option value="published"{#if $status_pub} selected{/if}>Yayında</option>
-    <option value="draft"{#if $status_draft} selected{/if}>Taslak</option>
-  </select>
-  <button>Filtrele</button>
+{#each $filter_defs as $fd}{#if $fd.is_select}  <select name="f_{$fd.name}" title="{$fd.label}">
+    <option value="">Tüm: {$fd.label}</option>
+{#each $fd.options as $o}    <option value="{$o.value}"{#if $o.selected} selected{/if}>{$o.label}</option>
+{/each}  </select>
+{/if}{#if !$fd.is_select}  <input type="text" name="f_{$fd.name}" value="{$fd.value}" placeholder="{$fd.label} içerir…" class="lf-text">
+{/if}{/each}  <button>Filtrele</button>
 </form>
 {#if $count == 0}<p class="muted">Kayıt yok.</p>{/if}
 <div class="table-wrap"><table>
-<thead><tr><th>Başlık</th><th>Slug</th><th>Durum</th><th>İşlemler</th></tr></thead>
+<thead><tr>{#each $columns as $col}<th>{$col.label}</th>{/each}<th>İşlemler</th></tr></thead>
 <tbody>
 {#each $items as $it}<tr>
-<td><a href="/admin/type/{$type.slug}/edit/{$it.id}">{$it.title}</a></td>
-<td class="muted">{$it.slug}</td>
-<td>{$it.status}{#if $it.is_scheduled} <span class="badge">zamanlanmış: {$it.sched_at}</span>{/if}</td>
-<td><a href="/preview/{$it.id}">önizle</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/duplicate/{$it.id}"><button class="btn-sm" type="submit">Çoğalt</button></form> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Silinsin mi?')"><button class="del" type="submit">Sil</button></form></td>
+{#each $it.cells as $cell}<td>{#if $cell.is_title}<a href="/admin/type/{$type.slug}/edit/{$it.id}">{$cell.value}</a>{#if $it.is_scheduled} <span class="badge">zamanlanmış: {$it.sched_at}</span>{/if}{/if}{#if $cell.is_image}{#if $cell.value}<img src="{$cell.value}" alt="" class="list-thumb" onerror="this.style.display='none'">{/if}{/if}{#if $cell.is_text}{$cell.value}{/if}</td>{/each}
+<td class="row-actions"><a href="/admin/type/{$type.slug}/edit/{$it.id}">düzenle</a> <a href="/preview/{$it.id}">önizle</a> <form class="inline" method="post" action="/admin/type/{$type.slug}/duplicate/{$it.id}"><button class="btn-sm" type="submit">Çoğalt</button></form> <form class="inline" method="post" action="/admin/type/{$type.slug}/delete/{$it.id}" onsubmit="return confirm('Silinsin mi?')"><button class="del" type="submit">Sil</button></form></td>
 </tr>{/each}
 </tbody>
 </table></div>
 {#if $multi_page}<nav class="pager">
-{#if $has_prev}<a href="/admin/type/{$type.slug}?q={$q}&status={$status}&page={$prev}">&larr; Önceki</a>{/if}
+{#if $has_prev}<a href="/admin/type/{$type.slug}?q={$q}{!$qs}&page={$prev}">&larr; Önceki</a>{/if}
 <span class="muted">Sayfa {$page} / {$pages}</span>
-{#if $has_next}<a href="/admin/type/{$type.slug}?q={$q}&status={$status}&page={$next}">Sonraki &rarr;</a>{/if}
+{#if $has_next}<a href="/admin/type/{$type.slug}?q={$q}{!$qs}&page={$next}">Sonraki &rarr;</a>{/if}
 </nav>{/if}
 {/block}

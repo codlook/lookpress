@@ -36,6 +36,20 @@ function content_fields($c, $type, $fields_json) {
             $out = array::push($out, ["name" => $name, "value" => render_blocks($v), "kind" => "blocks"]);
             continue;
         }
+        // gallery: JSON array of image URLs → the block renderer's gallery markup.
+        if ($ft == "gallery") {
+            $gh = render_gallery_field($v);
+            if ($gh == "") { continue; }
+            $out = array::push($out, ["name" => $name, "value" => $gh, "kind" => "gallery"]);
+            continue;
+        }
+        // repeater: JSON array of row objects → an HTML table (columns = sub-field defs).
+        if ($ft == "repeater") {
+            $th = render_repeater_field($f, $v);
+            if ($th == "") { continue; }
+            $out = array::push($out, ["name" => $name, "value" => $th, "kind" => "table"]);
+            continue;
+        }
         if ($kind == "row") {
             if ($ft == "url") { $kind = "url"; }
             else { if ($ft == "email") { $kind = "email"; }
@@ -95,6 +109,63 @@ function render_one_block($t, $d) {
     if ($t == "divider") { return "<hr class=\"blk-hr\">"; }
     return "";
 }
+// ── gallery / repeater field renderers (public) ───────────────────────────────
+// gallery value: JSON array of URLs (or an already-decoded list). Reuses the
+// gallery block markup so themes style one .blk-gallery. "" when empty/invalid.
+function render_gallery_field($v) {
+    $imgs = $v;
+    if (!type::is_array($imgs)) {
+        if ($v == null || $v == "") { return ""; }
+        $imgs = json::decode($v);
+    }
+    if ($imgs == null || !type::is_array($imgs) || count($imgs) == 0) { return ""; }
+    $d = array::new_assoc();
+    $d = array::set($d, "images", $imgs);
+    return render_one_block("gallery", $d);
+}
+// repeater value: JSON array of row objects. Columns come from the field's "fields"
+// sub-definitions (name/label); without them, from the first row's keys. Every cell
+// is escaped. "" when empty/invalid.
+function render_repeater_field($f, $v) {
+    $rows = $v;
+    if (!type::is_array($rows)) {
+        if ($v == null || $v == "") { return ""; }
+        $rows = json::decode($v);
+    }
+    if ($rows == null || !type::is_array($rows) || count($rows) == 0) { return ""; }
+    $cols = [];
+    $subs = $f["fields"];
+    if ($subs != null && type::is_array($subs)) {
+        foreach ($subs as $sf) {
+            $n = $sf["name"]; if ($n == null || $n == "") { continue; }
+            $l = $sf["label"]; if ($l == null || $l == "") { $l = $n; }
+            $cols = array::push($cols, ["name" => $n, "label" => $l]);
+        }
+    }
+    if (count($cols) == 0) {
+        $first = $rows[0];
+        if ($first != null && type::is_array($first)) {
+            foreach (array::keys($first) as $k) { $cols = array::push($cols, ["name" => $k, "label" => $k]); }
+        }
+    }
+    if (count($cols) == 0) { return ""; }
+    $h = "<table class=\"cf-table\"><thead><tr>";
+    foreach ($cols as $col) { $h = $h . "<th>" . html::escape($col["label"]) . "</th>"; }
+    $h = $h . "</tr></thead><tbody>";
+    foreach ($rows as $r) {
+        $h = $h . "<tr>";
+        foreach ($cols as $col) {
+            $cv = "";
+            // satır bir obje değilse (ör. düz liste) string anahtar okuma patlayabilir
+            if ($r != null && type::is_array($r)) { try { $cv = $r[$col["name"]]; } catch ($e) { $cv = ""; } }
+            if ($cv == null) { $cv = ""; }
+            if (type::is_array($cv)) { $cv = json::encode($cv); }
+            $h = $h . "<td>" . html::escape(type::to_string($cv)) . "</td>";
+        }
+        $h = $h . "</tr>";
+    }
+    return $h . "</tbody></table>";
+}
 function render_blocks($json) {
     if ($json == null) { return ""; }
     if ($json == "") { return ""; }
@@ -133,6 +204,10 @@ function hreflang_links($c, $type, $slug) {
 // ── public: published_rev ONLY. Serve content of a type by slug. ─────────────
 function render_published($type, $slug, $lang) {
     $c = conn();
+    // Module config: public=false → no public page (e.g. slider items), even if a
+    // url_pattern was left set. The listing gate is in render_listing.
+    $tdef = load_type($c, $type);
+    if ($tdef == null || !$tdef["config"]["public"]) { return response::status(404, view("notfound.html", [])); }
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     $fields = content_fields($c, $type, $rows[0]["fields_json"]);
@@ -201,7 +276,7 @@ function card_items($base, $rows) {
 }
 function render_listing($c, $type, $lang) {
     $t = load_type($c, $type);
-    if ($t == null) { return response::status(404, view("notfound.html", [])); }
+    if ($t == null || !$t["config"]["public"]) { return response::status(404, view("notfound.html", [])); }
     $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
     // Optional ?category= filter (generic: matches a "category" field in the item).

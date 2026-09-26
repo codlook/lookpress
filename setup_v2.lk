@@ -112,6 +112,11 @@ function ensure_column($c, $table, $col, $decl) {
 ensure_column($c, "content", "publish_at", "TEXT");
 db::exec($c, "CREATE INDEX IF NOT EXISTS idx_content_publish_at ON content(publish_at)", []);
 
+// Modül konfigürasyonu (spine): content_types.config_json — sidebar grubu, ikon,
+// tekil/çoğul etiket, liste kolonları, filtreler, sıra, public bayrağı. Tüm anahtarlar
+// opsiyonel; eksikler load_type() içinde varsayılanla dolar (src/types.lk).
+ensure_column($c, "content_types", "config_json", "TEXT");
+
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
 // /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently
@@ -126,12 +131,80 @@ function seed_type($c, $slug, $label, $url, $fields) {
             [$slug, $label, $url, json::encode($fields)]);
     }
 }
+// Modül şablonu: tip yoksa fields+config ile oluştur; varsa ve config_json boşsa
+// SADECE config'i doldur (mevcut alan tanımlarına/içeriğe dokunmaz — idempotent).
+function seed_module($c, $slug, $label, $url, $fields, $config) {
+    $ex = db::query($c, "SELECT id, config_json FROM content_types WHERE slug = ?", [$slug]);
+    if (count($ex) == 0) {
+        db::exec($c, "INSERT INTO content_types (slug, label, url_pattern, fields_json, config_json) VALUES (?, ?, ?, ?, ?)",
+            [$slug, $label, $url, json::encode($fields), json::encode($config)]);
+        return;
+    }
+    ensure_module_config($c, $slug, $config);
+}
+// Var olan bir tipe config_json yoksa yaz (eski kurulumlar: page/post/haber/… ve
+// uzantı tipleri, ör. commerce'in product'ı).
+function ensure_module_config($c, $slug, $config) {
+    $ex = db::query($c, "SELECT id, config_json FROM content_types WHERE slug = ?", [$slug]);
+    if (count($ex) == 0) { return; }
+    $cur = $ex[0]["config_json"];
+    if ($cur == null || $cur == "" || $cur == "null") {
+        db::exec($c, "UPDATE content_types SET config_json = ? WHERE slug = ?", [json::encode($config), $slug]);
+    }
+}
+function mod_cfg($group, $icon, $singular, $plural, $order, $public, $cols, $filters) {
+    return ["group" => $group, "icon" => $icon, "singular" => $singular, "plural" => $plural,
+            "order" => $order, "public" => $public, "list_columns" => $cols, "filters" => $filters];
+}
 $common = [
     ["name" => "title", "type" => "text",     "required" => true],
     ["name" => "body",  "type" => "markdown", "required" => false]
 ];
-seed_type($c, "page", "Page", "/{slug}",       $common);
-seed_type($c, "post", "Post", "/blog/{slug}",  $common);
+$std_cols = ["title", "status", "updated_at"];
+seed_module($c, "page", "Sayfalar", "/{slug}", $common,
+    mod_cfg("kurumsal", "📄", "Sayfa", "Sayfalar", 10, true, $std_cols, ["status"]));
+seed_module($c, "post", "Blog Yazıları", "/blog/{slug}", $common,
+    mod_cfg("icerik", "✍", "Blog Yazısı", "Blog Yazıları", 5, true, $std_cols, ["status"]));
+
+// ── module templates (spine) — a universal install starts with these modules ──
+// Each is a full module (auto CRUD + API + optional public URL). Idempotent: an
+// existing type keeps its fields/content; only a missing config_json is filled.
+seed_module($c, "slider", "Slider", "", [
+    ["name" => "image",    "type" => "image", "required" => true],
+    ["name" => "title",    "type" => "text",  "required" => true],
+    ["name" => "subtitle", "type" => "text"],
+    ["name" => "link",     "type" => "url"],
+    ["name" => "order",    "type" => "int"]
+], mod_cfg("kurumsal", "🖼", "Slayt", "Slider", 20, false, ["image", "title", "order", "status"], ["status"]));
+seed_module($c, "haber", "Haberler", "/haber/{slug}", [
+    ["name" => "title", "type" => "text",     "required" => true],
+    ["name" => "image", "type" => "image"],
+    ["name" => "body",  "type" => "markdown"]
+], mod_cfg("icerik", "📰", "Haber", "Haberler", 10, true, ["image", "title", "status", "updated_at"], ["status"]));
+seed_module($c, "duyuru", "Duyurular", "/duyuru/{slug}", $common,
+    mod_cfg("icerik", "📢", "Duyuru", "Duyurular", 20, true, $std_cols, ["status"]));
+seed_module($c, "galeri", "Galeri", "/galeri/{slug}", [
+    ["name" => "title",  "type" => "text",    "required" => true],
+    ["name" => "images", "type" => "gallery"]
+], mod_cfg("icerik", "🖼", "Galeri", "Galeri", 30, true, ["title", "images", "status", "updated_at"], ["status"]));
+seed_module($c, "video", "Videolar", "/video/{slug}", [
+    ["name" => "title",       "type" => "text", "required" => true],
+    ["name" => "url",         "type" => "url",  "required" => true],
+    ["name" => "description", "type" => "textarea"]
+], mod_cfg("icerik", "🎬", "Video", "Videolar", 40, true, ["title", "url", "status", "updated_at"], ["status"]));
+seed_module($c, "proje", "Projeler", "/proje/{slug}", [
+    ["name" => "title",   "type" => "text",     "required" => true],
+    ["name" => "body",    "type" => "markdown"],
+    ["name" => "image",   "type" => "image"],
+    ["name" => "gallery", "type" => "gallery"]
+], mod_cfg("icerik", "🏗", "Proje", "Projeler", 50, true, ["image", "title", "status", "updated_at"], ["status"]));
+seed_module($c, "etkinlik", "Etkinlikler", "/etkinlik/{slug}", [
+    ["name" => "title",    "type" => "text",     "required" => true],
+    ["name" => "body",     "type" => "markdown"],
+    ["name" => "date",     "type" => "date"],
+    ["name" => "location", "type" => "text"],
+    ["name" => "image",    "type" => "image"]
+], mod_cfg("icerik", "📅", "Etkinlik", "Etkinlikler", 60, true, ["title", "date", "location", "status"], ["status", "location"]));
 
 // ── seed built-in roles (RBAC) ────────────────────────────────────────────────
 // admin = superuser (perms implicit, see src/rbac.lk can()); editor = a sensible
@@ -205,6 +278,10 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
 // Extensions seed their own demo data (commerce overrides xp_seed → product type +
 // demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.
 xp_seed($c);
+// Existing/extension-seeded types without a module config get a sensible one
+// (no-op when config_json is already set; no-op when the type does not exist).
+ensure_module_config($c, "ekip",    mod_cfg("kurumsal",  "👥", "Ekip Üyesi", "Ekip", 30, true, ["title", "status", "updated_at"], ["status"]));
+ensure_module_config($c, "product", mod_cfg("ecommerce", "🛒", "Ürün", "Ürünler", 10, true, ["image", "title", "price", "category", "status"], ["status", "category"]));
 
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {
