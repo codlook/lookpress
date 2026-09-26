@@ -265,12 +265,74 @@ function dash_quick_actions($c) {
     return $qa;
 }
 
+// ── 7. ilk-kurulum kontrol listesi (onboarding) ──────────────────────────────
+// Route YOK, POST YOK: "kapat" düğmesi yerine her madde GERÇEK veriden ölçülür ve
+// tüm ölçülebilir maddeler tamamlanınca kart kendiliğinden kaybolur. Kural:
+//   site_title  → ayar satırı var ve varsayılan ("LookPress") değil
+//   anasayfa    → page/anasayfa(tr) var ve current_rev.rev_no > 1 (seed'den sonra düzenlendi)
+//   haber       → seed dışı (note != 'demo seed') en az bir haber revizyonu
+//   menü        → primary menü var ve iki seed listesinden biriyle birebir aynı değil
+//   tema        → `theme` ayarı yazılmış (Tema seç ekranından bir kez kaydedilmiş)
+//   yedek       → ölçülemez (bilgi maddesi, sayılmaz) — docs/ops-backup.md'ye yönlendirir
+function dash_setting_row($c, $key) {
+    $rows = dash_rows($c, "SELECT sval FROM settings WHERE ns = 'core' AND skey = ?", [$key]);
+    if (count($rows) == 0) { return null; }
+    return $rows[0]["sval"];
+}
+function dash_onboarding($c) {
+    $out = array::new_assoc();
+    $items = [];
+    // 1) site adı & logo
+    $st = dash_setting_row($c, "site_title");
+    $done_title = ($st != null && string::trim("" . $st) != "" && $st != cfg_default_title());
+    $items = array::push($items, ["label" => "Site adı ve logo", "hint" => "Ayarlar → Genel: site adı, slogan, logo.", "url" => "/admin/settings", "done" => $done_title, "info" => false]);
+    // 2) ana sayfa
+    $hp = dash_rows($c, "SELECT c.id, r.rev_no FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = 'page' AND c.slug = 'anasayfa' AND c.lang = 'tr'", []);
+    $done_home = false; $home_url = "/admin/type/page/new";
+    if (count($hp) > 0) {
+        $home_url = "/admin/type/page/edit/" . $hp[0]["id"];
+        if (type::to_int($hp[0]["rev_no"]) > 1) { $done_home = true; }
+    }
+    $items = array::push($items, ["label" => "Ana sayfayı düzenle", "hint" => "'anasayfa' sayfasının bloklarını (hero, slider, listeler) kendi içeriğinizle değiştirin.", "url" => $home_url, "done" => $done_home, "info" => false]);
+    // 3) ilk haber (seed dışı)
+    $nh = dash_count($c, "SELECT COUNT(*) AS n FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = 'haber' AND r.note != 'demo seed'", [], 0);
+    $items = array::push($items, ["label" => "İlk haberi ekle", "hint" => "Demo haberler silinebilir; kendi ilk haberinizi yayınlayın.", "url" => "/admin/type/haber/new", "done" => ($nh > 0), "info" => false]);
+    // 4) menü
+    $mr = dash_rows($c, "SELECT items_json FROM menus WHERE location = 'primary'", []);
+    $done_menu = false;
+    if (count($mr) > 0) {
+        $labels = "";
+        $dec = json::decode($mr[0]["items_json"]);
+        if ($dec != null && type::is_array($dec)) {
+            foreach ($dec as $it) { $l = ""; if (type::is_array($it)) { $l = $it["label"]; } if ($l == null) { $l = ""; } $labels = $labels . "|" . $l; }
+        }
+        if ($labels != "" && $labels != "|Mağaza|Blog|İletişim" && $labels != "|Anasayfa|Haberler|Projeler|Etkinlikler|Hakkımızda|İletişim") { $done_menu = true; }
+    }
+    $items = array::push($items, ["label" => "Menüyü düzenle", "hint" => "Üst menü bağlantılarını sitenize göre ayarlayın.", "url" => "/admin/menu", "done" => $done_menu, "info" => false]);
+    // 5) tema
+    $th = dash_setting_row($c, "theme");
+    $items = array::push($items, ["label" => "Tema seç", "hint" => "Tema ve renk paletini (skin) seçip kaydedin.", "url" => "/admin/themes", "done" => ($th != null && $th != ""), "info" => false]);
+    // 6) yedek — ölçülemez, bilgi
+    $items = array::push($items, ["label" => "Yedek al", "hint" => "scripts/backup.sh ile veritabanı + medya yedeği (bkz. docs/ops-backup.md).", "url" => "", "done" => false, "info" => true]);
+    $n_done = 0; $n_total = 0;
+    foreach ($items as $it) { if (!$it["info"]) { $n_total = $n_total + 1; if ($it["done"]) { $n_done = $n_done + 1; } } }
+    $out["onboarding"] = $items;
+    $out["onb_done"] = $n_done;
+    $out["onb_total"] = $n_total;
+    $out["onb_pct"] = 0; if ($n_total > 0) { $out["onb_pct"] = type::to_int(($n_done * 100) / $n_total); }
+    $out["show_onboarding"] = ($n_done < $n_total);
+    return $out;
+}
+
 // ── tümü: şablonun ihtiyaç duyduğu tek assoc ─────────────────────────────────
 function dashboard_data($c) {
     session::start();
     $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
     $d = array::new_assoc();
     $d["uname"] = $uname;
+    // ilk kurulum kontrol listesi
+    $o = dash_onboarding($c);
+    foreach (array::keys($o) as $k) { $d[$k] = $o[$k]; }
     // modül kutucukları
     $groups = dash_module_groups($c);
     $d["groups"] = $groups;

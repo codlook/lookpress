@@ -1,6 +1,7 @@
 {#extends "views/themes/default/layout"}
 {#block "content"}
-<section class="hero">
+{#if $has_landing}<div class="landing">{!$landing_html}</div>{/if}
+{#if !$has_landing}<section class="hero">
   <h1>{$site_title}</h1>
   <p>{$tagline}</p>
 </section>
@@ -8,5 +9,5 @@
 <div class="section-head"><h2>Son yazılar</h2><a class="more" href="{$lang_prefix}/blog">Tüm yazılar &rarr;</a></div>
 <ul class="pages">
 {#each $posts as $p}<li><a href="{$lang_prefix}/blog/{$p.slug}">{$p.title}</a></li>{/each}
-</ul>
+</ul>{/if}
 {/block}

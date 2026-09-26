@@ -51,6 +51,7 @@ use "src/dashboard.lk"; // admin dashboard data (counters, panels, quick actions
 use "src/render.lk";
 use "src/forms.lk";    // form builder (defined forms + submissions)
 use "src/security.lk"; // CSRF + login rate-limit + security headers (functions + before_route)
+use "src/mailer.lk";   // never-throwing mail wrapper (form notification / order confirmation / password reset)
 
 // ── extensions (register their own routes + hooks; touch no core file) ────────
 use "extensions/commerce/commerce.lk";

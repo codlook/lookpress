@@ -50,6 +50,22 @@
  .badge.open{background:#fef3c7;color:#92400e}
  .badge.st-cancelled{background:#fee2e2;color:#991b1b}
  .badge.st-delivered{background:#dcfce7;color:#166534}
+ .onb{background:var(--panel);border:1px solid var(--accent);border-radius:12px;box-shadow:var(--shadow);margin:14px 0 18px;overflow:hidden}
+ .onb-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line);background:#f8fafc}
+ .onb-head h3{margin:0 0 2px;font-size:15px}
+ .onb-head .sub{color:var(--muted);font-size:12px}
+ .onb-bar{flex:0 0 160px;height:8px;background:var(--line);border-radius:6px;overflow:hidden}
+ .onb-bar span{display:block;height:100%;background:var(--accent)}
+ .onb-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+ .onb-list li{display:flex;gap:10px;align-items:flex-start;padding:11px 16px;border-bottom:1px solid var(--line);font-size:13px}
+ .onb-mark{flex:0 0 22px;height:22px;border-radius:50%;border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted)}
+ .onb-list li.done .onb-mark{background:#dcfce7;color:#166534;border-color:#bbf7d0}
+ .onb-list li.done .onb-body b{text-decoration:line-through;color:var(--muted)}
+ .onb-list li.info .onb-mark{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+ .onb-body{flex:1;min-width:0}
+ .onb-body b{display:block}
+ .onb-body span{color:var(--muted);display:block;font-size:12px}
+ .onb .btn.small{font-size:12px;padding:4px 10px;flex-shrink:0}
  @media(max-width:480px){ .tiles{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))} .tile .t-n{font-size:22px} }
 </style>
 
@@ -57,6 +73,23 @@
   <h2>Panel</h2>
   <span class="sub">Hoş geldiniz, <b>{$uname}</b> · {$today}</span>
 </div>
+
+{#if $show_onboarding}<div class="onb">
+  <div class="onb-head">
+    <div><h3>Sitenizi kurmaya başlayın</h3><span class="sub">{$onb_done} / {$onb_total} adım tamamlandı · bu kart tüm adımlar bitince kaybolur</span></div>
+    <div class="onb-bar"><span style="width:{$onb_pct}%"></span></div>
+  </div>
+  <ul class="onb-list">
+{#each $onboarding as $o}    <li class="{#if $o.done}done{/if}{#if $o.info}info{/if}">
+      <span class="onb-mark">{#if $o.done}✓{/if}{#if !$o.done}{#if $o.info}i{/if}{#if !$o.info}○{/if}{/if}</span>
+      <div class="onb-body">
+        {#if $o.info}<b>{$o.label}</b>{/if}{#if !$o.info}<a href="{$o.url}"><b>{$o.label}</b></a>{/if}
+        <span>{$o.hint}</span>
+      </div>
+      {#if !$o.done}{#if !$o.info}<a class="btn small" href="{$o.url}">Git &rarr;</a>{/if}{/if}
+    </li>
+{/each}  </ul>
+</div>{/if}
 
 <div class="qa-bar">
 {#each $quick_actions as $a}  <a href="{$a.url}"><span class="ic">{$a.icon}</span> {$a.label}</a>

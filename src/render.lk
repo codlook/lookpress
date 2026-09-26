@@ -504,9 +504,9 @@ function render_published($type, $slug, $lang) {
     // Module config: public=false → no public page (e.g. slider items), even if a
     // url_pattern was left set. The listing gate is in render_listing.
     $tdef = load_type($c, $type);
-    if ($tdef == null || !$tdef["config"]["public"]) { return response::status(404, view("notfound.html", [])); }
+    if ($tdef == null || !$tdef["config"]["public"]) { return not_found_page(); }
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
-    if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
+    if (count($rows) == 0) { return not_found_page(); }
     $fields = content_fields($c, $type, $rows[0]["fields_json"]);
     $vals = json::decode($rows[0]["fields_json"]);
     // Per-item SEO with automatic fallback: seo_title → title, seo_desc → body excerpt.
@@ -573,7 +573,7 @@ function card_items($base, $rows) {
 }
 function render_listing($c, $type, $lang) {
     $t = load_type($c, $type);
-    if ($t == null || !$t["config"]["public"]) { return response::status(404, view("notfound.html", [])); }
+    if ($t == null || !$t["config"]["public"]) { return not_found_page(); }
     $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
     // Optional ?category= filter (generic: matches a "category" field in the item).
@@ -596,15 +596,42 @@ function render_listing($c, $type, $lang) {
 }
 
 // ── home + blog index (lang-aware) ───────────────────────────────────────────
+// Ön sayfa kararı: yayında bir `page` (tr → slug "anasayfa", en → "home") varsa VE
+// `icerik` (blocks) alanı boş değilse, o sayfanın blokları ön sayfadır (landing).
+// Aksi hâlde eski davranış: home.html'in tagline + son yazılar + uzantı vitrini.
+// Sayfanın başlığı <h2> olarak basılmaz (landing'de hero başlık taşır); <title> ve
+// SEO açıklaması sayfanın seo_title/seo_desc alanlarından, yoksa başlıktan gelir.
+function home_landing($c, $lang) {
+    $slug = "home"; if ($lang == "tr") { $slug = "anasayfa"; }
+    $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'page' AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$slug, $lang]);
+    if (count($rows) == 0) { return null; }
+    $vals = json::decode($rows[0]["fields_json"]);
+    if ($vals == null || !type::is_array($vals)) { return null; }
+    $raw = $vals["icerik"]; if ($raw == null) { return null; }
+    $html = render_blocks($raw);
+    if ($html == "") { return null; }
+    $seo_title = $vals["seo_title"]; if ($seo_title == null) { $seo_title = ""; }
+    $seo_desc = $vals["seo_desc"]; if ($seo_desc == null) { $seo_desc = ""; }
+    $ptitle = $seo_title; if ($ptitle == "") { $ptitle = site_title(); }
+    $desc = $seo_desc; if ($desc == "") { $desc = setting_get($c, "seo_description", ""); if ($desc == null) { $desc = ""; } }
+    $body = $rows[0]["body_html"]; if ($body == null) { $body = ""; }
+    return ["html" => $html . $body, "page_title" => $ptitle, "head_extra" => seo_head($ptitle, $desc, "website", "")];
+}
 function home_render($lang) {
     $c = conn();
     $pfx = lang_prefix($lang);
+    $landing = home_landing($c, $lang);
+    if ($landing != null) {
+        return response::html(view("home.html", ["has_landing" => true, "landing_html" => $landing["html"],
+            "page_title" => $landing["page_title"], "head_extra" => $landing["head_extra"],
+            "products_section" => "", "posts" => [], "tagline" => "", "lang_prefix" => $pfx]));
+    }
     // The homepage showcase is an extension seam — commerce injects a "Featured
     // products" grid. The core home knows only generic content (posts + tagline).
     $products_section = xp_home_sections(["lang" => $lang, "pfx" => $pfx]);
     $posts = db::query($c, "SELECT c.slug, r.title FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'post' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 5", [$lang]);
     $tagline = setting_get($c, "tagline", "Bir kurulum — blog, mağaza, kurumsal site. Aynı motor, tanımladığın içerik tipleri.");
-    return response::html(view("home.html", ["products_section" => $products_section, "posts" => $posts, "tagline" => $tagline, "lang_prefix" => $pfx]));
+    return response::html(view("home.html", ["has_landing" => false, "landing_html" => "", "products_section" => $products_section, "posts" => $posts, "tagline" => $tagline, "lang_prefix" => $pfx]));
 }
 function blog_render($lang) {
     $c = conn();
@@ -632,10 +659,18 @@ function resolve_1seg($c, $seg, $lang) {
     }
     $lt = type_for_base($c, "/" . $seg);
     if ($lt != "") { return render_listing($c, $lt, $lang); }
-    return response::status(404, view("notfound.html", []));
+    return not_found_page();
 }
 function resolve_2seg($c, $a, $b, $lang) {
     $slug = type_for_pattern($c, "/" . $a . "/{slug}");
-    if ($slug == "") { return response::status(404, view("notfound.html", [])); }
+    if ($slug == "") { return not_found_page(); }
     return render_published($slug, $b, $lang);
+}
+// 404: çekirdekte response::status(code, body) gövdeyi YOK SAYAR (yalnız durum kodunu
+// yazar; web_stdlib.cpp make_response_module "status"). Gövde response::html ile
+// ayrı basılır; status önce çağrılır, html status'u sıfırlamaz (sadece Content-Type
+// + body ekler). Sonuç: 404 + tema not-found görünümü.
+function not_found_page() {
+    response::status(404);
+    return response::html(view("notfound.html", ["page_title" => "Sayfa bulunamadı"]));
 }

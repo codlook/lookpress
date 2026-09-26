@@ -11,6 +11,7 @@ use date;
 use type;
 use string;
 use auth;
+use array;
 
 $c = db::connect(env("DB_DSN"));
 
@@ -227,15 +228,6 @@ function seed_role($c, $name, $label, $perms, $sys) {
 seed_role($c, "admin",  "Yönetici", [], 1);
 seed_role($c, "editor", "Editör",   ["content", "media", "forms"], 1);
 
-// ── seed the primary navigation menu (idempotent) so the site header has links ─
-if (count(db::query($c, "SELECT id FROM menus WHERE location = 'primary'", [])) == 0) {
-    db::exec($c, "INSERT INTO menus (location, items_json) VALUES ('primary', ?)", [json::encode([
-        ["label" => "Mağaza", "url" => "/product"],
-        ["label" => "Blog",   "url" => "/blog"],
-        ["label" => "İletişim", "url" => "/contact"]
-    ])]);
-}
-
 // ── seed the first admin user (once) from ADMIN_PASSWORD ──────────────────────
 // The env var is the SEED password for the initial `admin` account; change it
 // afterwards from /admin/users. If ADMIN_PASSWORD is unset, no admin is seeded
@@ -258,7 +250,10 @@ function seed_demo_item($c, $type, $slug, $lang, $title, $body, $fields) {
     $ts = date::timestamp();
     db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, ?, 'published', ?, ?)", [$type, $slug, $lang, $ts, $ts]);
     $cid = db::last_id($c);
-    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, ?, 0, ?, 'demo seed')", [$cid, $title, $body, "<p>" . $body . "</p>", json::encode($fields), $ts]);
+    // Gövde markdown olarak yorumlanır (düz metin yine <p>…</p> olur); alan değerleri
+    // (image/gallery/date/icerik-blocks JSON string) fields_json'a olduğu gibi yazılır.
+    $body_html = ""; if ($body != "") { $body_html = markdown_to_html($body); }
+    db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, ?, 0, ?, 'demo seed')", [$cid, $title, $body, $body_html, json::encode($fields), $ts]);
     $rid = db::last_id($c);
     db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $rid, $cid]);
     return 1;
@@ -268,6 +263,39 @@ function seed_form($c, $key, $title, $fields) {
     if (count(db::query($c, "SELECT id FROM forms WHERE fkey = ?", [$key])) > 0) { return; }
     db::exec($c, "INSERT INTO forms (fkey, title, fields_json, created_at) VALUES (?, ?, ?, ?)", [$key, $title, json::encode($fields), date::timestamp()]);
 }
+// Bir tipe alan tanımı ekle — sadece o isimde alan YOKSA (idempotent; mevcut
+// alanlara/içeriğe dokunmaz). Sayfaların blok-kompoze edilebilmesi için kullanılır.
+function ensure_type_field($c, $type, $field) {
+    $ex = db::query($c, "SELECT id, fields_json FROM content_types WHERE slug = ?", [$type]);
+    if (count($ex) == 0) { return; }
+    $defs = json::decode($ex[0]["fields_json"]);
+    if ($defs == null || !type::is_array($defs)) { $defs = []; }
+    foreach ($defs as $f) { if ($f["name"] == $field["name"]) { return; } }
+    $defs = array::push($defs, $field);
+    db::exec($c, "UPDATE content_types SET fields_json = ? WHERE slug = ?", [json::encode($defs), $type]);
+}
+// Ayar varsayılanı: (ns=core, skey) satırı YOKSA yaz; kullanıcının değerine dokunmaz.
+function seed_setting_default($c, $key, $val) {
+    if (count(db::query($c, "SELECT id FROM settings WHERE ns = 'core' AND skey = ?", [$key])) > 0) { return; }
+    db::exec($c, "INSERT INTO settings (ns, skey, sval) VALUES ('core', ?, ?)", [$key, $val]);
+}
+// Menü: konum satırı YOKSA ya da öğe listesi boşsa yaz (idempotent).
+function seed_menu_if_empty($c, $loc, $items) {
+    $rows = db::query($c, "SELECT id, items_json FROM menus WHERE location = ?", [$loc]);
+    if (count($rows) > 0) {
+        $cur = json::decode($rows[0]["items_json"]);
+        if ($cur != null && type::is_array($cur) && count($cur) > 0) { return; }
+        db::exec($c, "UPDATE menus SET items_json = ? WHERE location = ?", [json::encode($items), $loc]);
+        return;
+    }
+    db::exec($c, "INSERT INTO menus (location, items_json) VALUES (?, ?)", [$loc, json::encode($items)]);
+}
+// Blok kısayolu: {"type": t, "data": d}
+function blk($t, $d) { return ["type" => $t, "data" => $d]; }
+// Bugünden N gün sonrası, "YYYY-MM-DD" (etkinlik tarihleri hep gelecekte kalsın).
+function seed_future_date($days) { return date::format(date::timestamp() + ($days * 86400), "Y-m-d"); }
+// picsum.photos — telifsiz yer-tutucu görsel (seed'e göre sabit).
+function pic($seed, $w, $h) { return "https://picsum.photos/seed/" . $seed . "/" . $w . "/" . $h; }
 if (env("LOOKPRESS_SEED", "0") == "1") {
     // Core demo: a plain page + a few example content types so the grouped
     // "İçerik Yönetimi" sidebar is visible out of the box. Each is a full module
@@ -300,7 +328,141 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
         ["name" => "mesaj",    "label" => "Mesaj",         "type" => "textarea", "required" => false]
     ]);
     print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) + demo forms (basvuru/iletisim/is-basvuru) ===\n");
+
+    // ── Wave 3: dolu kurumsal demo site (slug bazında idempotent) ─────────────
+    // Sayfalar blok-kompoze edilebilsin: page tipine `icerik` (blocks) alanı — yoksa.
+    ensure_type_field($c, "page", ["name" => "icerik", "type" => "blocks", "required" => false]);
+
+    // Slider (3 slayt; modül public:false — sadece slider bloğu okur)
+    seed_demo_item($c, "slider", "slayt-1", "tr", "Geleceği birlikte inşa ediyoruz", "",
+        ["image" => pic("lp-slide1", 1600, 700), "title" => "Geleceği birlikte inşa ediyoruz", "subtitle" => "25 yıllık deneyim, 120'den fazla tamamlanmış proje", "link" => "/proje", "order" => "1"]);
+    seed_demo_item($c, "slider", "slayt-2", "tr", "Sürdürülebilir çözümler", "",
+        ["image" => pic("lp-slide2", 1600, 700), "title" => "Sürdürülebilir çözümler", "subtitle" => "Enerji verimli tasarım, yerel malzeme, uzun ömürlü yapılar", "link" => "/hakkimizda", "order" => "2"]);
+    seed_demo_item($c, "slider", "slayt-3", "tr", "Ekibimize katılın", "",
+        ["image" => pic("lp-slide3", 1600, 700), "title" => "Ekibimize katılın", "subtitle" => "Açık pozisyonlar için başvurunuzu bekliyoruz", "link" => "/forms/is-basvuru", "order" => "3"]);
+
+    // Haberler (4)
+    seed_demo_item($c, "haber", "yeni-genel-mudurluk-binamiz-acildi", "tr", "Yeni genel müdürlük binamız açıldı",
+        "İstanbul Maslak'taki yeni genel müdürlük binamız düzenlenen törenle hizmete girdi. LEED Gold sertifikalı bina, 400 çalışanımıza ev sahipliği yapacak.\n\nBina, yağmur suyu geri kazanımı ve çatı güneş panelleriyle enerji ihtiyacının yüzde 30'unu kendi üretiyor.",
+        ["image" => pic("lp-haber1", 1200, 700)]);
+    seed_demo_item($c, "haber", "2026-surdurulebilirlik-raporu-yayinlandi", "tr", "2026 Sürdürülebilirlik Raporu yayınlandı",
+        "Karbon ayak izimizi 2020'ye göre yüzde 42 azalttık. Raporun tamamına web sitemizden ulaşabilirsiniz.\n\nRapor, tedarik zincirimizdeki 85 firmanın verisini de kapsıyor.",
+        ["image" => pic("lp-haber2", 1200, 700)]);
+    seed_demo_item($c, "haber", "ankara-lojistik-merkezi-projesinde-ilk-kazma", "tr", "Ankara Lojistik Merkezi projesinde ilk kazma vuruldu",
+        "48.000 m² kapalı alana sahip Ankara Lojistik Merkezi'nin temel atma töreni gerçekleştirildi. Projenin 18 ayda tamamlanması planlanıyor.",
+        ["image" => pic("lp-haber3", 1200, 700)]);
+    seed_demo_item($c, "haber", "genc-muhendis-programi-basvurulari-basladi", "tr", "Genç Mühendis Programı başvuruları başladı",
+        "Üniversite son sınıf öğrencilerine yönelik 6 aylık ücretli staj programımız için başvurular 30 Haziran'a kadar alınacak.\n\nProgram sonunda başarılı katılımcılara tam zamanlı iş teklifi yapılıyor.",
+        ["image" => pic("lp-haber4", 1200, 700)]);
+
+    // Duyurular (3)
+    seed_demo_item($c, "duyuru", "bayram-tatili-calisma-saatleri", "tr", "Bayram tatili çalışma saatleri",
+        "Genel müdürlük ve şantiyelerimiz bayram süresince kapalı olacaktır. Acil durumlar için 7/24 destek hattımız hizmet vermeye devam edecektir.", []);
+    seed_demo_item($c, "duyuru", "tedarikci-portali-yenilendi", "tr", "Tedarikçi portalı yenilendi",
+        "Tedarikçilerimiz için hazırladığımız yeni portal ile fatura takibi ve ihale duyuruları tek ekranda. Mevcut kullanıcı bilgileriniz geçerliliğini koruyor.", []);
+    seed_demo_item($c, "duyuru", "olagan-genel-kurul-toplantisi", "tr", "Olağan genel kurul toplantısı",
+        "2026 yılı olağan genel kurul toplantımız genel müdürlük konferans salonunda yapılacaktır. Gündem ve vekâletname örneği yatırımcı ilişkileri sayfasındadır.", []);
+
+    // Projeler (3, galerili)
+    seed_demo_item($c, "proje", "maslak-ofis-kulesi", "tr", "Maslak Ofis Kulesi",
+        "32 katlı, 58.000 m² kiralanabilir alana sahip A+ ofis kulesi. Çift cidarlı cephe sistemi ve akıllı bina otomasyonu ile enerji tüketimi standart binalara göre yüzde 35 daha düşük.\n\n**Konum:** İstanbul, Maslak · **Teslim:** 2025",
+        ["image" => pic("lp-proje1", 1200, 800), "gallery" => json::encode([pic("lp-proje1a", 1200, 800), pic("lp-proje1b", 1200, 800), pic("lp-proje1c", 1200, 800), pic("lp-proje1d", 1200, 800)])]);
+    seed_demo_item($c, "proje", "izmir-marina-konutlari", "tr", "İzmir Marina Konutları",
+        "Deniz manzaralı 240 konut, sosyal tesisler ve 1.2 km sahil yürüyüş yolu. Deprem yönetmeliğinin üzerinde performans hedefiyle tasarlandı.\n\n**Konum:** İzmir, Çeşme · **Teslim:** 2026",
+        ["image" => pic("lp-proje2", 1200, 800), "gallery" => json::encode([pic("lp-proje2a", 1200, 800), pic("lp-proje2b", 1200, 800), pic("lp-proje2c", 1200, 800), pic("lp-proje2d", 1200, 800)])]);
+    seed_demo_item($c, "proje", "ankara-lojistik-merkezi", "tr", "Ankara Lojistik Merkezi",
+        "48.000 m² kapalı alan, 64 rampalı yükleme sahası ve soğuk zincir depo. Çatının tamamı güneş paneli ile kaplanıyor.\n\n**Konum:** Ankara, Kazan · **Teslim:** 2027",
+        ["image" => pic("lp-proje3", 1200, 800), "gallery" => json::encode([pic("lp-proje3a", 1200, 800), pic("lp-proje3b", 1200, 800), pic("lp-proje3c", 1200, 800), pic("lp-proje3d", 1200, 800)])]);
+
+    // Etkinlikler (3, gelecek tarihli)
+    seed_demo_item($c, "etkinlik", "yapi-fuari-2026", "tr", "Yapı Fuarı 2026 standımız",
+        "Bu yıl da Yapı Fuarı'ndayız. Hol 3, stand 3B-12'de yeni cephe sistemlerimizi yakından inceleyebilirsiniz.",
+        ["date" => seed_future_date(21), "location" => "TÜYAP, İstanbul", "image" => pic("lp-etk1", 1200, 700)]);
+    seed_demo_item($c, "etkinlik", "surdurulebilir-yapi-semineri", "tr", "Sürdürülebilir Yapı Semineri",
+        "Enerji verimli bina tasarımı üzerine yarım günlük ücretsiz seminer. Kontenjan 120 kişi, kayıt zorunludur.",
+        ["date" => seed_future_date(45), "location" => "Genel Müdürlük Konferans Salonu", "image" => pic("lp-etk2", 1200, 700)]);
+    seed_demo_item($c, "etkinlik", "kariyer-gunu-2026", "tr", "Kariyer Günü 2026",
+        "Mühendislik fakültesi öğrencileriyle buluşuyoruz: proje sunumları, birebir görüşmeler ve staj başvuruları.",
+        ["date" => seed_future_date(70), "location" => "İTÜ Ayazağa Kampüsü", "image" => pic("lp-etk3", 1200, 700)]);
+
+    // Galeri (2 × 4 görsel)
+    seed_demo_item($c, "galeri", "santiye-fotograflari", "tr", "Şantiye fotoğrafları", "",
+        ["images" => json::encode([pic("lp-gal1a", 1200, 800), pic("lp-gal1b", 1200, 800), pic("lp-gal1c", 1200, 800), pic("lp-gal1d", 1200, 800)])]);
+    seed_demo_item($c, "galeri", "acilis-toreni", "tr", "Açılış töreni", "",
+        ["images" => json::encode([pic("lp-gal2a", 1200, 800), pic("lp-gal2b", 1200, 800), pic("lp-gal2c", 1200, 800), pic("lp-gal2d", 1200, 800)])]);
+
+    // Videolar (2, YouTube)
+    seed_demo_item($c, "video", "kurumsal-tanitim-filmi", "tr", "Kurumsal tanıtım filmi", "",
+        ["url" => "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "description" => "Şirketimizi 3 dakikada tanıyın."]);
+    seed_demo_item($c, "video", "maslak-ofis-kulesi-zaman-atlamali", "tr", "Maslak Ofis Kulesi — zaman atlamalı", "",
+        ["url" => "https://youtu.be/jNQXAC9IVRw", "description" => "İnşaatın 24 ayı 90 saniyede."]);
+
+    // Ekip (2)
+    seed_demo_item($c, "ekip", "ayse-demir", "tr", "Ayşe Demir — Genel Müdür",
+        "İTÜ İnşaat Mühendisliği mezunu. 20 yılı aşkın süredir sektörde; 2019'dan bu yana genel müdür.", []);
+    seed_demo_item($c, "ekip", "mehmet-kaya", "tr", "Mehmet Kaya — Proje Direktörü",
+        "ODTÜ Mimarlık mezunu. Maslak Ofis Kulesi ve İzmir Marina Konutları projelerinin yöneticisi.", []);
+
+    // Hakkımızda (TR sayfa, birkaç blok)
+    seed_demo_item($c, "page", "hakkimizda", "tr", "Hakkımızda", "", ["icerik" => json::encode([
+        blk("hero", ["title" => "Hakkımızda", "subtitle" => "2001'den bu yana konut, ofis ve endüstriyel yapılar üretiyoruz.", "image" => pic("lp-about", 1600, 600), "align" => "left"]),
+        blk("paragraph", ["text" => "400 çalışanımız ve 3 şehirdeki ofislerimizle Türkiye'nin dört bir yanında projeler yürütüyoruz. Her projede aynı ilke: zamanında, bütçesinde, güvenli."]),
+        blk("columns", ["count" => "3", "cols" => [
+            ["blocks" => [blk("heading", ["level" => "3", "text" => "120+ proje"]), blk("paragraph", ["text" => "Konut, ofis, lojistik ve sağlık yapıları."])]],
+            ["blocks" => [blk("heading", ["level" => "3", "text" => "25 yıl"]), blk("paragraph", ["text" => "Kesintisiz faaliyet, sıfır ölümlü iş kazası."])]],
+            ["blocks" => [blk("heading", ["level" => "3", "text" => "3 ofis"]), blk("paragraph", ["text" => "İstanbul, Ankara ve İzmir."])]]
+        ]]),
+        blk("listing", ["module" => "ekip", "limit" => "6", "layout" => "cards", "show_image" => "0", "show_excerpt" => "1"]),
+        blk("button", ["label" => "Bize ulaşın", "url" => "/contact"])
+    ])]);
+
+    // Ana sayfa (TR, landing — home_render bunu bulunca ön sayfa olarak basar)
+    seed_demo_item($c, "page", "anasayfa", "tr", "Anasayfa", "", ["icerik" => json::encode([
+        blk("hero", ["title" => "Sağlam yapılar, güvenilir ortaklık", "subtitle" => "Konut, ofis ve endüstriyel projelerde 25 yıllık deneyim.", "image" => pic("lp-hero", 1600, 700), "button_label" => "Projelerimiz", "button_url" => "/proje", "align" => "center"]),
+        blk("slider", ["source" => "module", "module" => "slider", "limit" => "5"]),
+        blk("heading", ["level" => "2", "text" => "Haberler"]),
+        blk("listing", ["module" => "haber", "limit" => "3", "layout" => "cards", "show_image" => "1", "show_excerpt" => "1"]),
+        blk("columns", ["count" => "2", "cols" => [
+            ["blocks" => [blk("heading", ["level" => "3", "text" => "Neden biz?"]), blk("paragraph", ["text" => "Zamanında teslim, şeffaf bütçe ve iş güvenliğinde sıfır taviz. Her projede aynı ekip, aynı standart."])]],
+            ["blocks" => [blk("heading", ["level" => "3", "text" => "Sürdürülebilirlik"]), blk("paragraph", ["text" => "LEED ve BREEAM sertifikalı yapılar, yerel malzeme ve enerji verimli tasarım."])]]
+        ]]),
+        blk("heading", ["level" => "2", "text" => "Projeler"]),
+        blk("listing", ["module" => "proje", "limit" => "3", "layout" => "cards", "show_image" => "1", "show_excerpt" => "0"]),
+        blk("form", ["form" => "iletisim", "title" => "Bize yazın"]),
+        blk("map", ["embed_url" => "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3005.9!2d29.0123!3d41.1085!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zNDHCsDA2JzMwLjYiTiAyOcKwMDAnNDQuMyJF!5e0!3m2!1str!2str!4v1700000000000"])
+    ])]);
+
+    // Sabit Alanlar / iletişim / SEO varsayılanları (ayar yoksa)
+    seed_setting_default($c, "contact_email", "info@ornek-insaat.com");
+    seed_setting_default($c, "contact_phone", "+90 212 000 00 00");
+    seed_setting_default($c, "sabit_footer_text", "© Örnek İnşaat A.Ş. Tüm hakları saklıdır.");
+    seed_setting_default($c, "sabit_footer_links", json::encode([
+        ["label" => "Hakkımızda", "url" => "/hakkimizda"],
+        ["label" => "İletişim",   "url" => "/contact"],
+        ["label" => "Blog",       "url" => "/blog"]
+    ]));
+    seed_setting_default($c, "sabit_social_linkedin", "https://www.linkedin.com/company/ornek-insaat");
+    seed_setting_default($c, "seo_description", "Örnek İnşaat — konut, ofis ve endüstriyel yapılarda 25 yıllık deneyim.");
+
+    // Kurumsal ana menü (menü yok/boşsa)
+    seed_menu_if_empty($c, "primary", [
+        ["label" => "Anasayfa",    "url" => "/"],
+        ["label" => "Haberler",    "url" => "/haber"],
+        ["label" => "Projeler",    "url" => "/proje"],
+        ["label" => "Etkinlikler", "url" => "/etkinlik"],
+        ["label" => "Hakkımızda",  "url" => "/hakkimizda"],
+        ["label" => "İletişim",    "url" => "/contact"]
+    ]);
+    print("=== seeded corporate demo site (anasayfa/hakkimizda pages, slider, haber, duyuru, proje, etkinlik, galeri, video, ekip, settings, menu) ===\n");
 }
+
+// ── seed the primary navigation menu (idempotent) so the site header has links ─
+// (demo seed above may already have written the corporate menu — then this is a no-op)
+seed_menu_if_empty($c, "primary", [
+    ["label" => "Mağaza", "url" => "/product"],
+    ["label" => "Blog",   "url" => "/blog"],
+    ["label" => "İletişim", "url" => "/contact"]
+]);
 // Extensions seed their own demo data (commerce overrides xp_seed → product type +
 // demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.
 xp_seed($c);
