@@ -81,7 +81,10 @@
  button.del:hover{background:#b91c1c}
  .btn{display:inline-block;background:var(--accent);color:#fff;padding:8px 15px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:500}
  .btn:hover{background:var(--accent-d);text-decoration:none}
+ .btn-sm{padding:6px 11px;font-size:13px;border-radius:7px}
  form.inline{display:inline;margin:0}
+ form.urow{display:inline-flex;gap:6px;align-items:center;margin:2px 6px 2px 0}
+ form.urow select,form.urow input{margin-top:0;padding:6px 9px}
  .status-form,.settings-form,.user-form,.contact-form{max-width:560px}
  .status-form{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
  .status-form label{margin:0}
@@ -127,6 +130,33 @@
   .status-form select,.status-form button{width:100%}
   .topbar{padding:0 14px}
  }
+
+ /* ---- media field (image picker) ---- */
+ .media-field{margin-top:5px}
+ .mf-prev{margin-bottom:8px}
+ .mf-prev img.mf-preview{max-width:180px;max-height:140px;border:1px solid var(--line);border-radius:8px;display:block;object-fit:cover;background:#f1f5f9}
+ .mf-row{display:flex;gap:8px;align-items:center}
+ .mf-row .mf-url{flex:1;margin-top:0}
+ .mf-pick{white-space:nowrap}
+
+ /* ---- media picker modal ---- */
+ .mp-modal{position:fixed;inset:0;z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
+ .mp-modal.open{display:flex}
+ .mp-modal .mp-back{position:absolute;inset:0;background:rgba(15,23,42,.5)}
+ .mp-box{position:relative;background:var(--panel);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:760px;max-height:82vh;display:flex;flex-direction:column;overflow:hidden}
+ .mp-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+ .mp-head h3{margin:0;font-size:16px}
+ .mp-head .spacer{margin-left:auto}
+ .mp-close{background:none;border:0;font-size:22px;line-height:1;cursor:pointer;color:var(--muted);padding:4px 8px;border-radius:8px}
+ .mp-close:hover{background:var(--bg)}
+ .mp-up{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+ .mp-body{padding:16px 18px;overflow-y:auto}
+ .mp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
+ .mp-item{border:1px solid var(--line);border-radius:10px;overflow:hidden;cursor:pointer;background:#fff;transition:box-shadow .12s,border-color .12s}
+ .mp-item:hover{border-color:var(--accent);box-shadow:0 4px 14px rgba(37,99,235,.18)}
+ .mp-item img{display:block;width:100%;height:96px;object-fit:cover;background:#eef1f8}
+ .mp-item span{display:block;padding:6px 8px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .mp-empty{color:var(--muted);padding:24px;text-align:center}
 </style></head>
 <body>
 <div class="layout">
@@ -160,8 +190,64 @@
  </div>
 </div>
 <div class="backdrop" id="backdrop"></div>
+
+<!-- Media picker modal (shared by every image field) -->
+<div class="mp-modal" id="mpModal">
+ <div class="mp-back" data-mp-close></div>
+ <div class="mp-box">
+  <div class="mp-head">
+   <h3>Görsel seç</h3>
+   <span class="spacer"></span>
+   <label class="mp-up">↑ Yükle<input type="file" id="mpUpload" accept="image/*" style="display:none"></label>
+   <button class="mp-close" data-mp-close aria-label="Kapat">×</button>
+  </div>
+  <div class="mp-body"><div class="mp-grid" id="mpGrid"><div class="mp-empty">Yükleniyor…</div></div></div>
+ </div>
+</div>
+
 <script>
 (function(){
+ // ---- media picker: shared modal for all image fields ----
+ var modal=document.getElementById('mpModal'),grid=document.getElementById('mpGrid'),
+     upload=document.getElementById('mpUpload'),target=null;
+ function openModal(inp){target=inp;modal.classList.add('open');loadGrid();}
+ function closeModal(){modal.classList.remove('open');target=null;}
+ function pick(url){
+  if(!target)return;
+  target.value=url;
+  var field=target.closest('.media-field'),prev=field&&field.querySelector('.mf-prev');
+  if(prev)prev.innerHTML='<img src="'+url+'" alt="" class="mf-preview">';
+  closeModal();
+ }
+ function loadGrid(){
+  grid.innerHTML='<div class="mp-empty">Yükleniyor…</div>';
+  fetch('/admin/media/list',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(items){
+   if(!items||!items.length){grid.innerHTML='<div class="mp-empty">Arşivde görsel yok. Yukarıdan yükleyin.</div>';return;}
+   grid.innerHTML='';
+   items.forEach(function(it){
+    var d=document.createElement('div');d.className='mp-item';
+    d.innerHTML='<img src="'+it.url+'" alt=""><span>'+(it.original||it.name)+'</span>';
+    d.addEventListener('click',function(){pick(it.url);});
+    grid.appendChild(d);
+   });
+  }).catch(function(){grid.innerHTML='<div class="mp-empty">Liste yüklenemedi.</div>';});
+ }
+ document.addEventListener('click',function(e){
+  var pk=e.target.closest('.mf-pick');
+  if(pk){e.preventDefault();var f=pk.closest('.media-field');openModal(f&&f.querySelector('.mf-url'));return;}
+  if(e.target.hasAttribute&&e.target.hasAttribute('data-mp-close'))closeModal();
+ });
+ if(upload)upload.addEventListener('change',function(){
+  if(!upload.files||!upload.files[0])return;
+  var fd=new FormData();fd.append('file',upload.files[0]);
+  grid.innerHTML='<div class="mp-empty">Yükleniyor…</div>';
+  fetch('/admin/media/upload',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(res){
+   upload.value='';
+   if(res&&res.ok){pick(res.url);}else{grid.innerHTML='<div class="mp-empty">'+((res&&res.error)||'Yükleme başarısız')+'</div>';}
+  }).catch(function(){grid.innerHTML='<div class="mp-empty">Yükleme başarısız.</div>';});
+ });
+ document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+
  var b=document.getElementById('burger'),bd=document.getElementById('backdrop');
  function close(){document.body.classList.remove('nav-open');}
  if(b)b.addEventListener('click',function(){document.body.classList.toggle('nav-open');});

@@ -62,6 +62,18 @@ function field_input($c, $f, $value) {
     if ($t == "date") {
         return "<label>" . $name . "<input type=\"date\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
     }
+    if ($t == "image" || $name == "image") {
+        // Media field: a URL input + live preview + a "pick from library / upload" button
+        // wired to the admin media picker (see the modal + JS in views/admin/layout.html).
+        $prev = "";
+        if ($value != "") { $prev = "<img src=\"" . $v . "\" alt=\"\" class=\"mf-preview\">"; }
+        return "<label>" . $name
+             . "<div class=\"media-field\">"
+             . "<div class=\"mf-prev\">" . $prev . "</div>"
+             . "<div class=\"mf-row\"><input type=\"text\" name=\"" . $name . "\" value=\"" . $v . "\" class=\"mf-url\" placeholder=\"/media/… veya bir URL\">"
+             . "<button type=\"button\" class=\"btn mf-pick\">Görsel seç</button></div>"
+             . "</div></label>";
+    }
     if ($t == "select") {
         $opts = "";
         foreach ($f["choices"] as $ch) {

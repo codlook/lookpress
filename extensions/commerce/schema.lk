@@ -29,7 +29,7 @@ function xp_seed($c) {
                 ["name" => "body",  "type" => "markdown", "required" => false],
                 ["name" => "price", "type" => "text",     "required" => true],
                 ["name" => "sku",   "type" => "text",     "required" => false],
-                ["name" => "image", "type" => "text",     "required" => false]
+                ["name" => "image", "type" => "image",    "required" => false]
             ])]);
     }
     $have = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);

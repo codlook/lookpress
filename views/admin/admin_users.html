@@ -1,10 +1,11 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>Kullanıcılar <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
-<table>
-<thead><tr><th>Kullanıcı adı</th><th>Rol</th></tr></thead>
+<div class="section-head"><h2>Kullanıcılar <span class="muted">({$count})</span></h2></div>
+<div class="table-wrap"><table>
+<thead><tr><th>Kullanıcı</th><th>Rol</th><th>İşlemler</th></tr></thead>
 <tbody>{!$rows}</tbody>
-</table>
+</table></div>
+
 <h3>Yeni kullanıcı</h3>
 <form method="post" action="/admin/users/new" class="user-form">
   <label>Kullanıcı adı <input type="text" name="username" required></label>
@@ -14,4 +15,5 @@
   </label>
   <button type="submit">Ekle</button>
 </form>
+<p class="muted" style="font-size:13px;margin-top:14px"><b>editor</b>: içerik, medya, formlar ve siparişleri yönetir. <b>admin</b>: ek olarak kullanıcılar, ayarlar ve kuponlar.</p>
 {/block}

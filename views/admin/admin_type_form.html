@@ -9,9 +9,12 @@
 <option value="tr"{#if $lang == "tr"} selected{/if}>Türkçe</option>
 <option value="en"{#if $lang == "en"} selected{/if}>English</option>
 </select></label>
-<label>Status <select name="status"><option value="draft">draft</option><option value="published">published</option></select></label>
-<button type="submit">Save</button>
-<a class="muted" href="/admin/type/{$type.slug}" style="margin-left:12px">Cancel</a>
+<label>Durum <select name="status">
+<option value="draft"{#if $status == "draft"} selected{/if}>Taslak</option>
+<option value="published"{#if $status == "published"} selected{/if}>Yayında</option>
+</select></label>
+<button type="submit">Kaydet</button>
+<a class="muted" href="/admin/type/{$type.slug}" style="margin-left:12px">İptal</a>
 {#if $content_id}<a class="muted" href="/admin/type/{$type.slug}/history/{$content_id}" style="margin-left:12px">Sürüm geçmişi</a>{/if}
 </form>
 {/block}

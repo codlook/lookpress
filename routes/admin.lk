@@ -268,6 +268,39 @@ route("POST", "/admin/media/delete/{id}", function() {
     }
     return response::redirect("/admin/media");
 });
+// JSON list of media — feeds the in-editor media picker (image fields).
+route("GET", "/admin/media/list", function() {
+    if (!is_admin()) { return response::status(403, "{\"error\":\"admin only\"}"); }
+    $c = conn();
+    $rows = db::query($c, "SELECT sha_name, original, mime FROM media ORDER BY created_at DESC, id DESC LIMIT 200", []);
+    $out = [];
+    foreach ($rows as $r) {
+        $out = array::push($out, ["url" => "/media/" . $r["sha_name"], "name" => $r["sha_name"], "original" => $r["original"], "mime" => $r["mime"]]);
+    }
+    response::text(json::encode($out));
+    response::header("Content-Type", "application/json");
+    return;
+});
+// AJAX upload — the picker uploads a new image and gets its URL back (no page reload).
+route("POST", "/admin/media/upload", function() {
+    if (!is_admin()) { return response::status(403, "{\"ok\":false,\"error\":\"admin only\"}"); }
+    $f = null;
+    try { $f = request::file("file", ["max_size" => 5242880, "allow_mime" => cfg_media_mimes()]); } catch ($e) { $f = null; }
+    if ($f == null) {
+        response::text("{\"ok\":false,\"error\":\"No file, or type not allowed (png/jpeg/gif/webp, max 5 MB).\"}");
+        response::header("Content-Type", "application/json");
+        return;
+    }
+    $s = file::store($f, "media");
+    $c = conn();
+    $exists = db::query($c, "SELECT id FROM media WHERE sha_name = ?", [$s["name"]]);
+    if (count($exists) == 0) {
+        db::exec($c, "INSERT INTO media (sha_name, original, mime, size, created_at) VALUES (?, ?, ?, ?, ?)", [$s["name"], $f["filename"], $s["mime"], $f["size"], date::timestamp()]);
+    }
+    response::text(json::encode(["ok" => true, "url" => "/media/" . $s["name"], "name" => $s["name"]]));
+    response::header("Content-Type", "application/json");
+    return;
+});
 
 // ── admin: form submissions ──────────────────────────────────────────────────
 route("GET", "/admin/forms", function() {
@@ -295,16 +328,84 @@ route("GET", "/admin/forms", function() {
 // Commerce admin (orders, coupons) lives in extensions/commerce — not the core.
 
 // ── admin: users (role 'admin' only — RBAC) ──────────────────────────────────
+// A helper so no destructive action can remove the LAST admin (lockout guard).
+function admin_count($c) { return type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM users WHERE role = 'admin'", [])[0]["n"]); }
+
 route("GET", "/admin/users", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!is_super()) { return response::status(403, "Bu sayfa yalnız admin rolü içindir."); }
+    session::start();
+    $me = type::to_int(session::get("uid"));
     $c = conn();
-    $users = db::query($c, "SELECT username, role FROM users ORDER BY id", []);
+    $users = db::query($c, "SELECT id, username, role FROM users ORDER BY id", []);
     $rows = "";
     foreach ($users as $u) {
-        $rows = $rows . "<tr><td>" . html::escape($u["username"]) . "</td><td>" . html::escape($u["role"]) . "</td></tr>";
+        $uid = $u["id"];
+        $is_me = (type::to_int($uid) == $me);
+        $you = ""; if ($is_me) { $you = " <span class=\"badge\">siz</span>"; }
+        // role select (self can't be demoted here — avoids accidental self-lockout)
+        $rsel = "<form method=\"post\" action=\"/admin/users/" . $uid . "/role\" class=\"inline urow\">"
+              . "<select name=\"role\">"
+              . "<option value=\"editor\"" . ($u["role"] == "editor" ? " selected" : "") . ">editor</option>"
+              . "<option value=\"admin\""  . ($u["role"] == "admin"  ? " selected" : "") . ">admin</option>"
+              . "</select> <button class=\"btn-sm\">Rolü kaydet</button></form>";
+        // reset password
+        $pform = "<form method=\"post\" action=\"/admin/users/" . $uid . "/password\" class=\"inline urow\">"
+               . "<input type=\"password\" name=\"password\" placeholder=\"yeni şifre\" style=\"width:130px\"> <button class=\"btn-sm\">Sıfırla</button></form>";
+        // delete (not self)
+        $dform = "";
+        if (!$is_me) {
+            $dform = "<form method=\"post\" action=\"/admin/users/" . $uid . "/delete\" class=\"inline urow\" onsubmit=\"return confirm('Bu kullanıcı silinsin mi?')\"><button class=\"del\">Sil</button></form>";
+        }
+        $rows = $rows . "<tr><td><b>" . html::escape($u["username"]) . "</b>" . $you . "</td><td>" . $rsel . "</td><td>" . $pform . " " . $dform . "</td></tr>";
     }
     return response::html(admin_view("admin_users.html", ["rows" => $rows, "count" => count($users)]));
+});
+// Change a user's role (guard: can't demote the last admin).
+route("POST", "/admin/users/{id}/role", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $id = type::to_int(request::param("id"));
+    $role = request::post("role"); if ($role != "admin") { $role = "editor"; }
+    $cur = db::query($c, "SELECT role FROM users WHERE id = ?", [$id]);
+    if (count($cur) == 1) {
+        if ($cur[0]["role"] == "admin" && $role == "editor" && admin_count($c) <= 1) {
+            return response::status(400, "Son admin rolü düşürülemez (kilitlenme koruması).");
+        }
+        db::exec($c, "UPDATE users SET role = ? WHERE id = ?", [$role, $id]);
+    }
+    return response::redirect("/admin/users");
+});
+// Reset a user's password.
+route("POST", "/admin/users/{id}/password", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    $c = conn();
+    $id = type::to_int(request::param("id"));
+    $p = request::post("password");
+    if ($p != null && $p != "") {
+        db::exec($c, "UPDATE users SET password_hash = ? WHERE id = ?", [auth::hash($p), $id]);
+    }
+    return response::redirect("/admin/users");
+});
+// Delete a user (guard: not yourself, not the last admin).
+route("POST", "/admin/users/{id}/delete", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!is_super()) { return response::status(403, "admin only"); }
+    session::start();
+    $me = type::to_int(session::get("uid"));
+    $c = conn();
+    $id = type::to_int(request::param("id"));
+    if ($id == $me) { return response::status(400, "Kendinizi silemezsiniz."); }
+    $cur = db::query($c, "SELECT role FROM users WHERE id = ?", [$id]);
+    if (count($cur) == 1) {
+        if ($cur[0]["role"] == "admin" && admin_count($c) <= 1) {
+            return response::status(400, "Son admin silinemez (kilitlenme koruması).");
+        }
+        db::exec($c, "DELETE FROM users WHERE id = ?", [$id]);
+    }
+    return response::redirect("/admin/users");
 });
 route("POST", "/admin/users/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
