@@ -119,7 +119,9 @@ per-type code), the following work end to end:
 **Working platform, built slice by slice** — each feature above is verified end to end and locked by
 the smoke suite. Live reference deployment: **https://test.codlook.com** (Plesk). The design lives in
 **[PROJECT.md](PROJECT.md)**, the forward plan in **[ROADMAP.md](ROADMAP.md)** (positioning +
-phased engineering), and Plesk deployment in **[docs/plesk-deploy.md](docs/plesk-deploy.md)**.
+phased engineering), the V2 architecture contract in
+**[docs/platform-plan.md](docs/platform-plan.md)** (module/theme/domain/payment contracts +
+LOOK constraints), and Plesk deployment in **[docs/plesk-deploy.md](docs/plesk-deploy.md)**.
 Remaining before a real shop can take money: payment integration, transactional email, customer
 accounts (see the roadmap's Phase A).
 
