@@ -61,15 +61,24 @@ function render_published($type, $slug, $lang) {
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     $fields = content_fields($c, $type, $rows[0]["fields_json"]);
     $vals = json::decode($rows[0]["fields_json"]);
-    $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155);
+    // Per-item SEO with automatic fallback: seo_title → title, seo_desc → body excerpt.
+    $seo_title = ""; $seo_desc = "";
+    if ($vals != null) {
+        try { $seo_title = $vals["seo_title"]; } catch ($e) { $seo_title = ""; }
+        try { $seo_desc = $vals["seo_desc"]; } catch ($e) { $seo_desc = ""; }
+    }
+    if ($seo_title == null) { $seo_title = ""; }
+    if ($seo_desc == null) { $seo_desc = ""; }
+    $ptitle = $seo_title; if ($ptitle == "") { $ptitle = $rows[0]["title"]; }
+    $desc = $seo_desc; if ($desc == "") { $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155); }
     // Extension seam: listeners may add UI below the body (commerce → add-to-cart)
     // and extra <head> markup (commerce → Product/Offer JSON-LD). The core names
     // no extension and knows nothing of price/cart.
     $ctx = ["type" => $type, "slug" => $slug, "lang" => $lang, "vals" => $vals,
             "title" => $rows[0]["title"], "desc" => $desc, "body_html" => $rows[0]["body_html"]];
     $extra = xp_content_after_body($ctx);
-    $head = seo_head($rows[0]["title"], $desc, "website", "") . xp_content_head($ctx) . hreflang_links($c, $type, $slug);
-    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "fields" => $fields, "has_fields" => (count($fields) > 0), "extra" => $extra, "head_extra" => $head]));
+    $head = seo_head($ptitle, $desc, "website", "") . xp_content_head($ctx) . hreflang_links($c, $type, $slug);
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "page_title" => $ptitle, "content" => $rows[0]["body_html"], "fields" => $fields, "has_fields" => (count($fields) > 0), "extra" => $extra, "head_extra" => $head]));
 }
 
 // ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────

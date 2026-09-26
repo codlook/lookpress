@@ -5,6 +5,10 @@
 <form method="post" action="{$action}">
 <label>Slug <input name="slug" value="{$slug}" required></label>
 {!$fields_html}
+<details class="seo-box"><summary>SEO (opsiyonel)</summary>
+<label>Meta başlık <input name="seo_title" value="{$seo_title}" placeholder="Boş bırakılırsa içerik başlığı kullanılır"></label>
+<label>Meta açıklama <textarea name="seo_desc" rows="2" placeholder="Boş bırakılırsa içerikten otomatik üretilir">{$seo_desc}</textarea></label>
+</details>
 <label>Dil <select name="lang">
 <option value="tr"{#if $lang == "tr"} selected{/if}>Türkçe</option>
 <option value="en"{#if $lang == "en"} selected{/if}>English</option>

@@ -147,6 +147,16 @@ function slug_taken($c, $type, $slug, $exclude_id, $lang) {
 }
 
 // ── versioned-core write: create/update content as a new revision ────────────
+// Merge the optional per-item SEO fields (posted alongside the type's own fields)
+// into the stored values. They live in fields_json under reserved keys and are NOT
+// declared type fields, so they never render as visible content rows.
+function with_seo($values) {
+    $st = request::post("seo_title"); if ($st == null) { $st = ""; }
+    $sd = request::post("seo_desc");  if ($sd == null) { $sd = ""; }
+    $values = array::set($values, "seo_title", string::trim($st));
+    $values = array::set($values, "seo_desc", string::trim($sd));
+    return $values;
+}
 function save_content($c, $type, $id, $slug, $values, $status, $lang) {
     $title = $values["title"];
     $body_md = $values["body"];

@@ -152,7 +152,7 @@ route("GET", "/admin/type/{type}/new", function() {
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
     $form = fields_form_html($c, $t["fields"], null);
-    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "lang" => "tr", "errors" => []]));
+    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => "", "status" => "draft", "lang" => "tr", "seo_title" => "", "seo_desc" => "", "errors" => []]));
 });
 route("POST", "/admin/type/{type}/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -168,9 +168,9 @@ route("POST", "/admin/type/{type}/new", function() {
     if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, 0, $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
+        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/new", "content_id" => "", "heading" => "New " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "seo_title" => request::post("seo_title"), "seo_desc" => request::post("seo_desc"), "errors" => $errs]));
     }
-    save_content($c, $t["slug"], 0, $slug, $v["values"], request::post("status"), $lang);
+    save_content($c, $t["slug"], 0, $slug, with_seo($v["values"]), request::post("status"), $lang);
     return response::redirect("/admin/type/" . $t["slug"]);
 });
 
@@ -184,7 +184,10 @@ route("GET", "/admin/type/{type}/edit/{id}", function() {
     if (count($rows) == 0) { return response::status(404, "No such item"); }
     $vals = json::decode($rows[0]["fields_json"]);
     $form = fields_form_html($c, $t["fields"], $vals);
-    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "lang" => $rows[0]["lang"], "errors" => []]));
+    $sv_t = ""; $sv_d = "";
+    if ($vals != null) { try { $sv_t = $vals["seo_title"]; } catch ($e) { $sv_t = ""; } try { $sv_d = $vals["seo_desc"]; } catch ($e) { $sv_d = ""; } }
+    if ($sv_t == null) { $sv_t = ""; } if ($sv_d == null) { $sv_d = ""; }
+    return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $rows[0]["slug"], "status" => $rows[0]["status"], "lang" => $rows[0]["lang"], "seo_title" => $sv_t, "seo_desc" => $sv_d, "errors" => []]));
 });
 route("POST", "/admin/type/{type}/edit/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -199,9 +202,9 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
     if ($slug != "") { if (slug_taken($c, $t["slug"], $slug, type::to_int(request::param("id")), $lang)) { $errs = array::push($errs, "bu slug bu dilde zaten kullanımda"); } }
     if (count($errs) > 0) {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
-        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "errors" => $errs]));
+        return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "seo_title" => request::post("seo_title"), "seo_desc" => request::post("seo_desc"), "errors" => $errs]));
     }
-    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, $v["values"], request::post("status"), $lang);
+    save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, with_seo($v["values"]), request::post("status"), $lang);
     return response::redirect("/admin/type/" . $t["slug"]);
 });
 
