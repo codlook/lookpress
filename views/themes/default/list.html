@@ -1,6 +1,7 @@
 {#extends "views/themes/default/layout"}
 {#block "content"}
 <h2>{$label} <span class="muted">({$count})</span></h2>
+{!$filters}
 {#if $count == 0}<p class="muted">No published items yet.</p>{/if}
 <div class="cards">
 {#each $items as $it}<a class="card" href="{$it.url}">{#if $it.has_image}<span class="card-img"><img src="{$it.image}" alt="" onerror="this.style.display='none'"></span>{/if}<div class="card-body"><div class="card-title">{$it.title}</div>{#if $it.has_price}<div class="card-price">{$it.price} &#8378;</div>{/if}</div></a>{/each}

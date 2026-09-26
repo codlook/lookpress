@@ -81,6 +81,10 @@
  .langsw a{color:var(--accent)}
  .coupon-form{display:flex;gap:10px;max-width:420px;margin:14px 0}
  .coupon-form input{flex:1}
+ .cat-chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 18px}
+ .cat-chips .chip{display:inline-block;padding:5px 13px;border:1px solid var(--line);border-radius:20px;font-size:14px;text-decoration:none;color:var(--fg)}
+ .cat-chips .chip:hover{border-color:var(--accent);color:var(--accent)}
+ .cat-chips .chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
 </style></head>
 <body data-theme="{$skin}">
 <header><h1><a href="/">{$site_title}</a></h1>

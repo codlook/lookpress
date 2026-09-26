@@ -269,6 +269,18 @@ function xp_dashboard_panels($x) {
     if ($rh == "") { $rh = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
     return "<h3>Son siparişler</h3><div class=\"table-wrap\"><table><thead><tr><th>No</th><th>Müşteri</th><th>Tutar</th><th>Durum</th></tr></thead><tbody>" . $rh . "</tbody></table></div>";
 }
+// Product listing: clickable category chips (filter via ?category=slug).
+function xp_listing_filters($c, $type, $lang, $active) {
+    if ($type != "product") { return ""; }
+    $base = lang_prefix($lang) . "/product";
+    $all = "chip"; if ($active == "") { $all = "chip active"; }
+    $out = "<div class=\"cat-chips\"><a href=\"" . $base . "\" class=\"" . $all . "\">Tümü</a>";
+    foreach (category_all($c) as $cat) {
+        $cls = "chip"; if ($active == $cat["slug"]) { $cls = "chip active"; }
+        $out = $out . "<a href=\"" . $base . "?category=" . $cat["slug"] . "\" class=\"" . $cls . "\">" . html::escape($cat["name"]) . "</a>";
+    }
+    return $out . "</div>";
+}
 // Homepage showcase: a "Featured products" grid (uses the core's generic card builder).
 function xp_home_sections($ctx) {
     $c = conn();

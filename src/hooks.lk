@@ -26,6 +26,9 @@ function xp_permissions() { return []; }
 // full <label>…</label> HTML (commerce → a "category" <select>). Return "" to let
 // the core fall back to a plain text input.
 function xp_field_input($c, $f, $value) { return ""; }
+// Filter UI above a public listing (commerce → category chips on /product).
+// $active is the current ?category= value. Return "" for no filters.
+function xp_listing_filters($c, $type, $lang, $active) { return ""; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }

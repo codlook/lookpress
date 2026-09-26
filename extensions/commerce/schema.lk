@@ -41,9 +41,9 @@ function xp_seed($c) {
     }
     $have = db::query($c, "SELECT id FROM content WHERE type = 'product' LIMIT 1", []);
     if (count($have) == 0) {
-        commerce_seed_product($c, "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""]);
-        commerce_seed_product($c, "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => ""]);
-        commerce_seed_product($c, "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => ""]);
+        commerce_seed_product($c, "kirmizi-tisort", "tr", "Kırmızı Tişört", "Yüzde 100 pamuk, rahat kesim.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim"]);
+        commerce_seed_product($c, "kirmizi-tisort", "en", "Red T-Shirt", "100% cotton, comfortable fit.", ["price" => "249.90", "sku" => "TS-RED-001", "image" => "", "category" => "giyim"]);
+        commerce_seed_product($c, "mavi-kot",       "tr", "Mavi Kot Pantolon", "Slim fit, dayanıklı kumaş.", ["price" => "399.00", "sku" => "JN-BLU-002", "image" => "", "category" => "giyim"]);
     }
     $hc = db::query($c, "SELECT id FROM coupons LIMIT 1", []);
     if (count($hc) == 0) {

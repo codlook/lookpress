@@ -128,7 +128,19 @@ function render_listing($c, $type, $lang) {
     if ($t == null) { return response::status(404, view("notfound.html", [])); }
     $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
-    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "items" => card_items($base, $rows)]));
+    // Optional ?category= filter (generic: matches a "category" field in the item).
+    $cat = request::get("category"); if ($cat == null) { $cat = ""; }
+    if ($cat != "") {
+        $keep = [];
+        foreach ($rows as $r) {
+            $v = json::decode($r["fields_json"]); $rc = "";
+            if ($v != null) { try { $rc = $v["category"]; } catch ($e) { $rc = ""; } }
+            if ($rc == $cat) { $keep = array::push($keep, $r); }
+        }
+        $rows = $keep;
+    }
+    $filters = xp_listing_filters($c, $type, $lang, $cat);
+    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "items" => card_items($base, $rows), "filters" => $filters]));
 }
 
 // ── home + blog index (lang-aware) ───────────────────────────────────────────
