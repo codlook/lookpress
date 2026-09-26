@@ -21,11 +21,11 @@
 <form method="post" action="/admin/forms/new" class="user-form">
   <label>Başlık <input name="title" required></label>
   <label>Anahtar (slug) <input name="fkey" placeholder="ör. iletisim" required></label>
-  <label>Alanlar (JSON) <textarea name="fields" rows="8">[
+  <div class="field-builder"><label>Alanlar</label><textarea name="fields" rows="8">[
   {"name":"ad","label":"Ad Soyad","type":"text","required":true},
   {"name":"email","label":"E-posta","type":"email","required":true},
   {"name":"mesaj","label":"Mesaj","type":"textarea"}
-]</textarea></label>
+]</textarea></div>
   <button type="submit">Form oluştur</button>
 </form>
 <p class="muted" style="font-size:13px;margin-top:10px">Alan tipleri: <code>text · email · tel · textarea</code>. Form <code>/forms/&lt;anahtar&gt;</code> adresinde yayımlanır (honeypot spam korumalı).</p>

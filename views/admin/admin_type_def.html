@@ -6,7 +6,7 @@
 <label>Slug (used in code + URLs) <input name="slug" value="{$slug}" placeholder="recipe" required></label>
 <label>Label <input name="label" value="{$label}" placeholder="Recipe" required></label>
 <label>URL pattern (must contain <code>{slug}</code>) <input name="url_pattern" value="{$url_pattern}" placeholder="/recipes/{slug}" required></label>
-<label>Fields (JSON — must include title + body)<textarea name="fields" rows="12">{$fields}</textarea></label>
+<div class="field-builder"><label>Alanlar (title + body zorunlu)</label><textarea name="fields" rows="12">{$fields}</textarea></div>
 <button type="submit">Create type</button>
 </form>
 <p class="muted">Field types: text · textarea · markdown · int · decimal · bool · date · select (with <code>choices</code>) · relation (with <code>to</code>).</p>

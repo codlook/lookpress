@@ -186,6 +186,17 @@
  .seo-box{border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:14px 0;background:#f8fafc}
  .seo-box summary{cursor:pointer;font-size:14px;font-weight:500;color:var(--muted)}
  .seo-box[open] summary{margin-bottom:6px;color:var(--fg)}
+
+ /* ---- visual field builder ---- */
+ .field-builder textarea{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+ .fb-rows{display:flex;flex-direction:column;gap:8px;margin:6px 0}
+ .fb-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f8fafc;border:1px solid var(--line);border-radius:9px;padding:8px}
+ .fb-row input[type=text],.fb-row .fb-name,.fb-row .fb-label{margin-top:0;flex:1;min-width:120px}
+ .fb-row .fb-type{margin-top:0;width:auto}
+ .fb-req{display:inline-flex;align-items:center;gap:6px;margin:0;font-weight:400;font-size:13px;white-space:nowrap}
+ .fb-req input{width:auto;margin:0}
+ .fb-del{padding:4px 10px;font-size:15px;line-height:1}
+ .fb-bar{display:flex;gap:8px;align-items:center;margin:4px 0 6px}
 </style></head>
 <body>
 <div class="layout">
@@ -239,6 +250,50 @@
 
 <script>
 (function(){
+ // ---- visual field builder: edit fields[] without hand-writing JSON ----
+ function esc(s){return (s==null?'':(''+s)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+ var FTYPES=['text','textarea','markdown','int','decimal','bool','date','select','image','relation','category','email','tel'];
+ document.querySelectorAll('.field-builder').forEach(function(fb){
+  var ta=fb.querySelector('textarea'); if(!ta) return;
+  var form=fb.closest('form');
+  var rows=[]; try{ rows=JSON.parse(ta.value)||[]; }catch(e){ rows=[]; }
+  ta.style.display='none';
+  var ui=document.createElement('div'); ui.className='fb-rows'; fb.appendChild(ui);
+  var bar=document.createElement('div'); bar.className='fb-bar';
+  var add=document.createElement('button'); add.type='button'; add.className='btn-sm'; add.textContent='+ Alan ekle';
+  add.addEventListener('click',function(){ rows.push({name:'',label:'',type:'text',required:false}); render(); });
+  var adv=document.createElement('button'); adv.type='button'; adv.className='btn-ghost'; adv.textContent='JSON';
+  adv.addEventListener('click',function(){ sync(); ta.style.display=(ta.style.display==='none'?'block':'none'); });
+  bar.appendChild(add); bar.appendChild(adv); fb.appendChild(bar);
+  function render(){
+   ui.innerHTML='';
+   rows.forEach(function(r,i){
+    var d=document.createElement('div'); d.className='fb-row';
+    var opts=FTYPES.map(function(t){return '<option'+(t===r.type?' selected':'')+'>'+t+'</option>';}).join('');
+    d.innerHTML='<input class="fb-name" placeholder="ad (kod)" value="'+esc(r.name)+'">'
+     +'<input class="fb-label" placeholder="Etiket" value="'+esc(r.label)+'">'
+     +'<select class="fb-type">'+opts+'</select>'
+     +'<label class="fb-req"><input type="checkbox" class="fb-reqcb"'+(r.required?' checked':'')+'> zorunlu</label>'
+     +'<button type="button" class="del fb-del" title="Kaldır">&times;</button>';
+    d.querySelector('.fb-del').addEventListener('click',function(){ rows.splice(i,1); render(); });
+    ui.appendChild(d);
+   });
+  }
+  function sync(){
+   var out=[];
+   ui.querySelectorAll('.fb-row').forEach(function(d){
+    var name=d.querySelector('.fb-name').value.trim(); if(!name) return;
+    var o={name:name,type:d.querySelector('.fb-type').value};
+    var lbl=d.querySelector('.fb-label').value.trim(); if(lbl) o.label=lbl;
+    if(d.querySelector('.fb-reqcb').checked) o.required=true;
+    out.push(o);
+   });
+   ta.value=JSON.stringify(out,null,2);
+  }
+  if(form) form.addEventListener('submit',sync);
+  render();
+ });
+
  // ---- media picker: shared modal for all image fields ----
  var modal=document.getElementById('mpModal'),grid=document.getElementById('mpGrid'),
      upload=document.getElementById('mpUpload'),target=null;
