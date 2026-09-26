@@ -8,3 +8,4 @@ docker/*      text eol=lf
 *.html        text eol=lf
 *.md          text eol=lf
 *.yml         text eol=lf
+*.json        text eol=lf
