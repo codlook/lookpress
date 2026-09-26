@@ -1,12 +1,107 @@
 {#extends "views/admin/layout"}
 {#block "content"}
+<style>
+ .set-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px;border-bottom:1px solid var(--line,#e5e7eb)}
+ .set-tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;font-size:14px;color:var(--muted,#6b7280)}
+ .set-tabs button.on{color:#111827;border-bottom-color:#111827;font-weight:600}
+ .set-section{display:none}
+ .set-section.on{display:block}
+ .set-section fieldset{border:1px solid var(--line,#e5e7eb);border-radius:8px;padding:14px 16px;margin:0 0 16px}
+ .set-section legend{font-weight:600;padding:0 6px}
+ .set-hint{font-size:12px;color:var(--muted,#6b7280);margin:-4px 0 10px}
+ .set-warn{font-size:12px;background:#fef3c7;color:#92400e;padding:6px 10px;border-radius:6px;margin:0 0 10px}
+ .set-ok{background:#dcfce7;color:#166534;padding:8px 12px;border-radius:6px;margin:0 0 14px;font-size:13px}
+ .settings-form textarea{width:100%;font-family:ui-monospace,monospace;font-size:13px}
+</style>
 <div class="section-head"><h2>Ayarlar</h2><a class="more" href="/admin">&larr; Admin</a></div>
-<form method="post" action="/admin/settings" class="settings-form">
-  <label>Site başlığı <input type="text" name="site_title" value="{$s_title}"></label>
-  <label>Slogan <input type="text" name="tagline" value="{$s_tagline}"></label>
-  <label>Para birimi <input type="text" name="currency" value="{$s_currency}"></label>
-  <label>Tema (şablon seti) <select name="theme">{!$theme_options}</select></label>
-  <label>Skin (renk paleti) <select name="skin">{!$skin_options}</select></label>
+{#if $saved}<div class="set-ok">Ayarlar kaydedildi.</div>{/if}
+
+<div class="set-tabs" id="set-tabs">
+  <button type="button" data-tab="genel">Genel</button>
+  <button type="button" data-tab="seo">SEO</button>
+  <button type="button" data-tab="tema">Tema</button>
+  <button type="button" data-tab="dil">Dil</button>
+  <button type="button" data-tab="sabit">Sabit Alanlar</button>
+</div>
+
+<form method="post" action="/admin/settings" class="settings-form" style="max-width:720px">
+  <input type="hidden" name="tab" id="set-tab-field" value="{$tab}">
+
+  <div class="set-section" data-tab="genel">
+    <fieldset><legend>Site</legend>
+      <label>Site başlığı <input type="text" name="site_title" value="{$s_title}"></label>
+      <label>Slogan <input type="text" name="tagline" value="{$s_tagline}"></label>
+      <label>Para birimi <input type="text" name="currency" value="{$s_currency}"></label>
+    </fieldset>
+    <fieldset><legend>İletişim bilgileri</legend>
+      <p class="set-hint">Tema altbilgisinde / iletişim sayfasında gösterilir.</p>
+      <label>E-posta <input type="email" name="contact_email" value="{$s_contact_email}"></label>
+      <label>Telefon <input type="text" name="contact_phone" value="{$s_contact_phone}"></label>
+      <label>Adres <textarea name="contact_address" rows="3">{$s_contact_address}</textarea></label>
+    </fieldset>
+  </div>
+
+  <div class="set-section" data-tab="seo">
+    <fieldset><legend>SEO</legend>
+      <label>Varsayılan meta açıklama <textarea name="seo_description" rows="3" maxlength="320">{$s_seo_description}</textarea></label>
+      <label>Varsayılan OG görseli (URL) <input type="url" name="seo_og_image" value="{$s_seo_og_image}" placeholder="https://…/og.png"></label>
+      <label>robots.txt ek satırları <textarea name="robots_extra" rows="3" placeholder="Disallow: /gizli">{$s_robots_extra}</textarea></label>
+    </fieldset>
+    <fieldset><legend>Analitik / head kodu</legend>
+      <div class="set-warn">Bu alan <b>ham HTML</b> olarak saklanır ve her sayfanın &lt;head&gt; bölümüne olduğu gibi basılır. Yalnız güvenilir yöneticiler düzenlemeli.</div>
+      <label>Head snippet <textarea name="analytics_head" rows="6" placeholder="&lt;script async src=&quot;…&quot;&gt;&lt;/script&gt;">{$s_analytics_head}</textarea></label>
+    </fieldset>
+  </div>
+
+  <div class="set-section" data-tab="tema">
+    <fieldset><legend>Tema</legend>
+      <p class="set-hint">Temaları önizlemek ve etkinleştirmek için <a href="/admin/themes">Temalar</a> sayfasını kullanın.</p>
+      <label>Tema (şablon seti) <select name="theme">{!$theme_options}</select></label>
+      {#if $has_skins}<label>Skin (renk paleti) <select name="skin">{!$skin_options}</select></label>{/if}
+    </fieldset>
+  </div>
+
+  <div class="set-section" data-tab="dil">
+    <fieldset><legend>Dil</legend>
+      <label>Varsayılan dil
+        <select name="default_lang">
+          <option value="tr"{#if $lang_tr} selected{/if}>Türkçe (tr)</option>
+          <option value="en"{#if $lang_en} selected{/if}>English (en)</option>
+        </select>
+      </label>
+      <p class="set-hint">İçerik dil-bazlı saklanır (tr / en); varsayılan dil, ön yüz kök adresinde hangi dilin gösterileceğini belirler.</p>
+    </fieldset>
+  </div>
+
+  <div class="set-section" data-tab="sabit">
+    <fieldset><legend>Üst bilgi</legend>
+      <label>Duyuru şeridi (header) <input type="text" name="sabit_header_announcement" value="{$s_sabit_header_announcement}" placeholder="Boş bırakılırsa gösterilmez"></label>
+    </fieldset>
+    <fieldset><legend>Alt bilgi</legend>
+      <label>Footer metni <textarea name="sabit_footer_text" rows="2">{$s_sabit_footer_text}</textarea></label>
+      <label>Footer bağlantıları <textarea name="footer_links_text" rows="5" placeholder="Hakkımızda | /about&#10;Gizlilik | /gizlilik">{$s_footer_links_text}</textarea></label>
+      <p class="set-hint">Satır başına bir bağlantı: <code>Etiket | /url</code>.</p>
+    </fieldset>
+    <fieldset><legend>Sosyal medya</legend>
+      <label>Instagram <input type="url" name="sabit_social_instagram" value="{$s_sabit_social_instagram}"></label>
+      <label>Facebook <input type="url" name="sabit_social_facebook" value="{$s_sabit_social_facebook}"></label>
+      <label>X (Twitter) <input type="url" name="sabit_social_x" value="{$s_sabit_social_x}"></label>
+      <label>YouTube <input type="url" name="sabit_social_youtube" value="{$s_sabit_social_youtube}"></label>
+      <label>LinkedIn <input type="url" name="sabit_social_linkedin" value="{$s_sabit_social_linkedin}"></label>
+    </fieldset>
+  </div>
+
   <button type="submit">Kaydet</button>
 </form>
+<script>
+// Sekmeler: tek form, tüm bölümler her kayıtta gönderilir; aktif sekme gizli alanda taşınır.
+(function(){
+  var tabs=document.querySelectorAll('#set-tabs button'),secs=document.querySelectorAll('.set-section'),fld=document.getElementById('set-tab-field');
+  function show(t){var ok=false;secs.forEach(function(s){var on=s.getAttribute('data-tab')===t;s.classList.toggle('on',on);if(on)ok=true;});
+    if(!ok){t='genel';secs.forEach(function(s){s.classList.toggle('on',s.getAttribute('data-tab')===t);});}
+    tabs.forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});fld.value=t;}
+  tabs.forEach(function(b){b.addEventListener('click',function(){show(b.getAttribute('data-tab'));});});
+  show(fld.value||'genel');
+})();
+</script>
 {/block}

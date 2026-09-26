@@ -494,13 +494,19 @@ route("GET", "/admin/forms", function() {
     $items = [];
     foreach (form_all($c) as $f) {
         $fd = json::decode($f["fields_json"]); $nf = 0; if ($fd != null) { $nf = count($fd); }
-        $items = array::push($items, ["fkey" => $f["fkey"], "title" => $f["title"], "nfields" => $nf, "nsubs" => form_submission_count($c, $f["fkey"])]);
+        $sc = form_status_counts($c, $f["fkey"]);
+        $items = array::push($items, ["fkey" => $f["fkey"], "title" => $f["title"], "nfields" => $nf, "nsubs" => $sc["total"],
+            "n_acik" => $sc["acik"], "n_islemde" => $sc["islemde"], "n_kapali" => $sc["kapali"]]);
     }
     // submission keys with no form definition (e.g. the styled /contact page)
     $keys = db::query($c, "SELECT form_key, COUNT(*) AS n FROM form_submissions GROUP BY form_key", []);
     $other = [];
     foreach ($keys as $k) {
-        if (form_get($c, $k["form_key"]) == null) { $other = array::push($other, ["fkey" => $k["form_key"], "nsubs" => type::to_int($k["n"])]); }
+        if (form_get($c, $k["form_key"]) == null) {
+            $sc = form_status_counts($c, $k["form_key"]);
+            $other = array::push($other, ["fkey" => $k["form_key"], "nsubs" => type::to_int($k["n"]),
+                "n_acik" => $sc["acik"], "n_islemde" => $sc["islemde"], "n_kapali" => $sc["kapali"]]);
+        }
     }
     return response::html(admin_view("admin_forms.html", ["items" => $items, "count" => count($items), "other" => $other, "has_other" => (count($other) > 0)]));
 });
@@ -527,22 +533,96 @@ route("GET", "/admin/form/{key}", function() {
     $def = form_get($c, $key);
     $cols = [];
     if ($def != null) { foreach ($def["fields"] as $f) { $cols = array::push($cols, $f["name"]); } }
-    $subs = db::query($c, "SELECT data_json FROM form_submissions WHERE form_key = ? ORDER BY id DESC LIMIT 500", [$key]);
+    // Wave 2: durum filtresi (?status=acik|islemde|kapali) + CSV dışa aktarım (?export=csv)
+    $sf = request::get("status"); if ($sf == null) { $sf = ""; } $sf = string::trim($sf);
+    if (!array::contains(form_statuses(), $sf)) { $sf = ""; }
+    $where = "form_key = ?"; $params = [$key];
+    if ($sf != "") { $where = $where . " AND COALESCE(status, 'acik') = ?"; $params = array::push($params, $sf); }
+    $export = request::get("export"); if ($export == null) { $export = ""; }
+    $lim = " LIMIT 500"; if ($export == "csv") { $lim = ""; }   // CSV: filtreye uyan TÜM satırlar
+    $subs = db::query($c, "SELECT id, data_json, status, notes, created_at, updated_at FROM form_submissions WHERE " . $where . " ORDER BY id DESC" . $lim, $params);
     if ($def == null && count($subs) > 0) {
         $d0 = json::decode($subs[0]["data_json"]);
         if ($d0 != null) { foreach (array::keys($d0) as $k) { $cols = array::push($cols, $k); } }
     }
+    if ($export == "csv") {
+        // UTF-8 BOM (Excel) + başlık: alan adları + status + notes + created + updated
+        $head = $cols; $head = array::push($head, "status"); $head = array::push($head, "notes");
+        $head = array::push($head, "created"); $head = array::push($head, "updated");
+        $csv = "﻿" . csv_row($head);
+        foreach ($subs as $s) {
+            $d = json::decode($s["data_json"]);
+            $vals = form_sub_values($d, $cols);
+            $st = $s["status"]; if ($st == null || $st == "") { $st = "acik"; }
+            $nt = $s["notes"]; if ($nt == null) { $nt = ""; }
+            $ca = type::to_int($s["created_at"]); $cs = ""; if ($ca > 0) { $cs = date::format($ca, "Y-m-d H:i:s"); }
+            $ua = type::to_int($s["updated_at"]); $us = ""; if ($ua > 0) { $us = date::format($ua, "Y-m-d H:i:s"); }
+            $vals = array::push($vals, $st); $vals = array::push($vals, $nt);
+            $vals = array::push($vals, $cs); $vals = array::push($vals, $us);
+            $csv = $csv . csv_row($vals);
+        }
+        $fname = $key; if ($sf != "") { $fname = $fname . "-" . $sf; }
+        response::text($csv);
+        response::header("Content-Type", "text/csv; charset=utf-8");
+        response::header("Content-Disposition", "attachment; filename=\"" . $fname . "-gonderimler.csv\"");
+        return;
+    }
     $rows = [];
     foreach ($subs as $s) {
-        $d = json::decode($s["data_json"]); $vals = [];
-        foreach ($cols as $col) {
-            $v = ""; if ($d != null) { try { $v = $d[$col]; } catch ($e) { $v = ""; } } if ($v == null) { $v = ""; }
-            $vals = array::push($vals, $v);
-        }
-        $rows = array::push($rows, ["vals" => $vals]);
+        $d = json::decode($s["data_json"]);
+        $st = $s["status"]; if ($st == null || $st == "") { $st = "acik"; }
+        if (!array::contains(form_statuses(), $st)) { $st = "acik"; }
+        $nt = $s["notes"]; if ($nt == null) { $nt = ""; }
+        $ca = type::to_int($s["created_at"]); $cs = ""; if ($ca > 0) { $cs = date::format($ca, "d.m.Y H:i"); }
+        $ua = type::to_int($s["updated_at"]); $us = ""; if ($ua > 0) { $us = date::format($ua, "d.m.Y H:i"); }
+        $rows = array::push($rows, ["id" => $s["id"], "vals" => form_sub_values($d, $cols), "status" => $st,
+            "status_label" => form_status_label($st), "is_acik" => ($st == "acik"), "is_islemde" => ($st == "islemde"), "is_kapali" => ($st == "kapali"),
+            "notes" => $nt, "has_notes" => ($nt != ""), "created" => $cs, "updated" => $us, "has_updated" => ($us != "")]);
     }
     $title = $key; if ($def != null) { $title = $def["title"]; }
-    return response::html(admin_view("admin_form_subs.html", ["title" => $title, "fkey" => $key, "cols" => $cols, "rows" => $rows, "count" => count($subs)]));
+    $sc = form_status_counts($c, $key);
+    return response::html(admin_view("admin_form_subs.html", ["title" => $title, "fkey" => $key, "cols" => $cols, "rows" => $rows, "count" => count($subs),
+        "sf" => $sf, "f_all" => ($sf == ""), "f_acik" => ($sf == "acik"), "f_islemde" => ($sf == "islemde"), "f_kapali" => ($sf == "kapali"),
+        "n_total" => $sc["total"], "n_acik" => $sc["acik"], "n_islemde" => $sc["islemde"], "n_kapali" => $sc["kapali"]]));
+});
+// Wave 2 — the ONE new route: submission actions on a single POST (route budget).
+// Fields: sub_id + action (status|note|delete) [+ status | + note]. Same gate as
+// the other forms routes (is_admin + can("forms")); CSRF auto-injected by layout.
+route("POST", "/admin/form/{key}", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("forms")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    $key = request::param("key");
+    $id = type::to_int(request::post("sub_id"));
+    $action = request::post("action"); if ($action == null) { $action = ""; }
+    $back = "/admin/form/" . $key;
+    $rs = request::post("return_status"); if ($rs != null && array::contains(form_statuses(), $rs)) { $back = $back . "?status=" . $rs; }
+    // the row must belong to THIS form key (no cross-form edits via a forged id)
+    $row = db::query($c, "SELECT id, notes FROM form_submissions WHERE id = ? AND form_key = ?", [$id, $key]);
+    if (count($row) == 0) { return response::status(404, "Gönderim bulunamadı."); }
+    $now = date::timestamp();
+    if ($action == "status") {
+        $st = request::post("status"); if ($st == null) { $st = ""; }
+        if (!array::contains(form_statuses(), $st)) { return response::status(400, "Invalid status (acik | islemde | kapali)."); }
+        db::exec($c, "UPDATE form_submissions SET status = ?, updated_at = ? WHERE id = ?", [$st, $now, $id]);
+        return response::redirect($back);
+    }
+    if ($action == "note") {
+        $note = request::post("note"); if ($note == null) { $note = ""; } $note = string::trim($note);
+        if ($note == "") { return response::redirect($back); }
+        session::start();
+        $who = session::get("uname"); if ($who == null) { $who = ""; }
+        $prev = $row[0]["notes"]; if ($prev == null) { $prev = ""; }
+        $line = "[" . date::format($now, "d.m.Y H:i") . " " . $who . "] " . $note;
+        if ($prev != "") { $line = $prev . "\n" . $line; }
+        db::exec($c, "UPDATE form_submissions SET notes = ?, updated_at = ? WHERE id = ?", [$line, $now, $id]);
+        return response::redirect($back);
+    }
+    if ($action == "delete") {
+        db::exec($c, "DELETE FROM form_submissions WHERE id = ?", [$id]);
+        return response::redirect($back);
+    }
+    return response::status(400, "Unknown action (status | note | delete).");
 });
 
 // Commerce admin (orders, coupons) lives in extensions/commerce — not the core.
@@ -768,14 +848,60 @@ route("GET", "/admin/settings", function() {
         $sa = ""; if ($sk == $cur_skin) { $sa = " selected"; }
         $kopts = $kopts . "<option value=\"" . $sk . "\"" . $sa . ">" . $sk . "</option>";
     }
-    return response::html(admin_view("admin_settings.html", [
-        "s_title"    => setting_get($c, "site_title", cfg_default_title()),
-        "s_tagline"  => setting_get($c, "tagline", ""),
-        "s_currency" => setting_get($c, "currency", cfg_default_currency()),
-        "theme_options" => $topts,
-        "skin_options" => $kopts
-    ]));
+    // Wave 2: bölümlü ayarlar (Genel / SEO / Tema / Dil / Sabit Alanlar). Tüm anahtarlar
+    // ns='core' (setting_get/set sadece core'u bilir); sabit alanlar 'sabit_' önekli.
+    $data = array::new_assoc();
+    $data = array::set($data, "s_title",    setting_get($c, "site_title", cfg_default_title()));
+    $data = array::set($data, "s_tagline",  setting_get($c, "tagline", ""));
+    $data = array::set($data, "s_currency", setting_get($c, "currency", cfg_default_currency()));
+    $data = array::set($data, "theme_options", $topts);
+    $data = array::set($data, "skin_options", $kopts);
+    $data = array::set($data, "has_skins", (count(cfg_skins()) > 0));
+    foreach (settings_text_keys() as $k) { $data = array::set($data, "s_" . $k, setting_get($c, $k, "")); }
+    $dl = setting_get($c, "default_lang", "tr");
+    $data = array::set($data, "lang_tr", ($dl != "en"));
+    $data = array::set($data, "lang_en", ($dl == "en"));
+    $data = array::set($data, "s_footer_links_text", footer_links_text(setting_get($c, "sabit_footer_links", "[]")));
+    $saved = request::get("saved"); $data = array::set($data, "saved", ($saved == "1"));
+    $tab = request::get("tab"); if ($tab == null || $tab == "") { $tab = "genel"; }
+    $data = array::set($data, "tab", $tab);
+    return response::html(admin_view("admin_settings.html", $data));
 });
+// Serbest-metin ayar anahtarları (Genel / SEO / Sabit Alanlar) — GET bunları
+// "s_<key>" olarak şablona verir, POST aynı adlı form alanından okur.
+function settings_text_keys() {
+    return ["contact_email", "contact_phone", "contact_address",
+            "seo_description", "seo_og_image", "robots_extra", "analytics_head",
+            "sabit_footer_text", "sabit_header_announcement",
+            "sabit_social_instagram", "sabit_social_facebook", "sabit_social_x", "sabit_social_youtube", "sabit_social_linkedin"];
+}
+// Footer bağlantıları: textarea'da satır başına "Etiket | /url" ↔ JSON [{label,url}].
+function footer_links_parse($text) {
+    $out = [];
+    if ($text == null) { return $out; }
+    foreach (string::split($text, "\n") as $ln) {
+        $ln = string::trim($ln);
+        if ($ln == "") { continue; }
+        $parts = string::split($ln, "|");
+        if (count($parts) < 2) { continue; }
+        $lbl = string::trim($parts[0]); $url = string::trim($parts[1]);
+        if ($lbl == "" || $url == "") { continue; }
+        $out = array::push($out, ["label" => $lbl, "url" => $url]);
+    }
+    return $out;
+}
+function footer_links_text($json) {
+    $arr = json::decode($json); if ($arr == null || !type::is_array($arr)) { return ""; }
+    $lines = [];
+    foreach ($arr as $l) {
+        $lbl = ""; $url = "";
+        if (array::contains(array::keys($l), "label")) { $lbl = $l["label"]; }
+        if (array::contains(array::keys($l), "url")) { $url = $l["url"]; }
+        if ($lbl == null) { $lbl = ""; } if ($url == null) { $url = ""; }
+        $lines = array::push($lines, $lbl . " | " . $url);
+    }
+    return string::join($lines, "\n");
+}
 route("POST", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
@@ -787,6 +913,17 @@ route("POST", "/admin/settings", function() {
     if (array::contains(cfg_themes(), $th)) { setting_set($c, "theme", $th); }
     $sk = request::post("skin");
     if (array::contains(cfg_skins(), $sk)) { setting_set($c, "skin", $sk); }
+    // Wave 2 bölümleri — tek form, tüm alanlar her kayıtta gelir (sekmeler CSS/JS ile).
+    // analytics_head / robots_extra HAM saklanır (yalnız güvenilir admin; şablon {!} basar).
+    foreach (settings_text_keys() as $k) {
+        $v = request::post($k); if ($v == null) { $v = ""; }
+        setting_set($c, $k, string::trim($v));
+    }
+    $dl = request::post("default_lang"); if ($dl != "en") { $dl = "tr"; }
+    setting_set($c, "default_lang", $dl);
+    setting_set($c, "sabit_footer_links", json::encode(footer_links_parse(request::post("footer_links_text"))));
     settings_bust();
-    return response::redirect("/admin/settings");
+    $tab = request::post("tab"); if ($tab == null || $tab == "") { $tab = "genel"; }
+    if (!string::regex_match($tab, "^[a-z]+$")) { $tab = "genel"; }
+    return response::redirect("/admin/settings?saved=1&tab=" . $tab);
 });

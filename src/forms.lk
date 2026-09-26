@@ -6,6 +6,7 @@ use db;
 use json;
 use array;
 use type;
+use string;
 
 // Thin helpers (no query-builder).
 function form_get($c, $key) {
@@ -34,10 +35,62 @@ function form_field_views($fields) {
         $itype = "text";
         if ($t == "email") { $itype = "email"; }
         if ($t == "tel") { $itype = "tel"; }
+        if ($t == "url") { $itype = "url"; }
         $out = array::push($out, [
             "name" => $f["name"], "label" => $label, "required" => $req,
             "is_textarea" => ($t == "textarea"), "is_input" => ($t != "textarea"), "input_type" => $itype
         ]);
     }
     return $out;
+}
+
+// ── Wave 2: gönderim yaşam döngüsü (Destek Biletleri) + CSV dışa aktarım ─────
+// form_submissions.status: acik | islemde | kapali (setup_v2 ensure_column ile
+// eklendi; eski satırlar 'acik' varsayılan). Notlar düz metin, satır-satır eklenir.
+function form_statuses() { return ["acik", "islemde", "kapali"]; }
+function form_status_label($s) {
+    if ($s == "islemde") { return "İşlemde"; }
+    if ($s == "kapali") { return "Kapalı"; }
+    return "Açık";
+}
+// Bir formun durum-bazlı gönderim sayıları → assoc {acik, islemde, kapali, total}.
+function form_status_counts($c, $key) {
+    $out = array::new_assoc();
+    foreach (form_statuses() as $s) { $out = array::set($out, $s, 0); }
+    $total = 0;
+    $rows = db::query($c, "SELECT status, COUNT(*) AS n FROM form_submissions WHERE form_key = ? GROUP BY status", [$key]);
+    foreach ($rows as $r) {
+        $st = $r["status"]; if ($st == null || $st == "") { $st = "acik"; }
+        if (!array::contains(form_statuses(), $st)) { $st = "acik"; }
+        $n = type::to_int($r["n"]);
+        $out = array::set($out, $st, $out[$st] + $n);
+        $total = $total + $n;
+    }
+    $out = array::set($out, "total", $total);
+    return $out;
+}
+// Bir gönderimin data_json'undan kolon listesine göre değer dizisi (eksik → "").
+function form_sub_values($d, $cols) {
+    $vals = [];
+    foreach ($cols as $col) {
+        $v = ""; if ($d != null) { if (array::contains(array::keys($d), $col)) { $v = $d[$col]; } } if ($v == null) { $v = ""; }
+        $vals = array::push($vals, type::to_string($v));
+    }
+    return $vals;
+}
+// RFC 4180 hücre: çift-tırnak içine al, içteki " → "". Excel formül enjeksiyonuna
+// karşı =,+,-,@ ile başlayan değerlerin önüne tek tırnak.
+function csv_cell($v) {
+    $s = type::to_string($v);
+    if ($s == null) { $s = ""; }
+    if (string::len($s) > 0) {
+        $c0 = string::substr($s, 0, 1);
+        if ($c0 == "=" || $c0 == "+" || $c0 == "-" || $c0 == "@") { $s = "'" . $s; }
+    }
+    return "\"" . string::replace($s, "\"", "\"\"") . "\"";
+}
+function csv_row($vals) {
+    $cells = [];
+    foreach ($vals as $v) { $cells = array::push($cells, csv_cell($v)); }
+    return string::join($cells, ",") . "\r\n";
 }

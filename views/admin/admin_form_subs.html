@@ -1,11 +1,73 @@
 {#extends "views/admin/layout"}
 {#block "content"}
+<style>
+ .st-tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px}
+ .st-tabs a{padding:5px 12px;border:1px solid var(--line,#e5e7eb);border-radius:20px;text-decoration:none;font-size:13px}
+ .st-tabs a.on{background:#111827;color:#fff;border-color:#111827}
+ .st-badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+ .st-acik{background:#fee2e2;color:#991b1b}
+ .st-islemde{background:#fef3c7;color:#92400e}
+ .st-kapali{background:#dcfce7;color:#166534}
+ .sub-actions{display:flex;flex-direction:column;gap:6px;min-width:220px}
+ .sub-actions form{display:flex;gap:4px;align-items:center;margin:0}
+ .sub-actions select,.sub-actions input{font-size:12px;padding:3px 6px}
+ .sub-actions button{font-size:12px;padding:3px 8px}
+ .sub-actions button.danger{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+ .sub-notes{white-space:pre-wrap;font-size:12px;color:var(--muted,#6b7280);max-width:320px;margin-top:6px;border-left:2px solid #e5e7eb;padding-left:8px}
+ .sub-meta{font-size:11px;color:var(--muted,#6b7280);white-space:nowrap}
+ td.sub-val{max-width:280px;overflow-wrap:anywhere}
+</style>
 <div class="section-head"><h2>{$title} — Gönderimler <span class="muted">({$count})</span></h2><a class="more" href="/admin/forms">&larr; Formlar</a></div>
-{#if $count == 0}<p class="muted">Henüz gönderim yok.</p>{/if}
+
+<div class="st-tabs">
+  <a href="/admin/form/{$fkey}"{#if $f_all} class="on"{/if}>Tümü ({$n_total})</a>
+  <a href="/admin/form/{$fkey}?status=acik"{#if $f_acik} class="on"{/if}>Açık ({$n_acik})</a>
+  <a href="/admin/form/{$fkey}?status=islemde"{#if $f_islemde} class="on"{/if}>İşlemde ({$n_islemde})</a>
+  <a href="/admin/form/{$fkey}?status=kapali"{#if $f_kapali} class="on"{/if}>Kapalı ({$n_kapali})</a>
+  {#if $f_all}<a href="/admin/form/{$fkey}?export=csv">&#8681; CSV indir</a>{/if}
+  {#if $f_acik}<a href="/admin/form/{$fkey}?export=csv&status=acik">&#8681; CSV indir (açık)</a>{/if}
+  {#if $f_islemde}<a href="/admin/form/{$fkey}?export=csv&status=islemde">&#8681; CSV indir (işlemde)</a>{/if}
+  {#if $f_kapali}<a href="/admin/form/{$fkey}?export=csv&status=kapali">&#8681; CSV indir (kapalı)</a>{/if}
+</div>
+
+{#if $count == 0}<p class="muted">Bu filtrede gönderim yok.</p>{/if}
 <div class="table-wrap"><table>
-<thead><tr>{#each $cols as $col}<th>{$col}</th>{/each}</tr></thead>
+<thead><tr><th>#</th><th>Durum</th>{#each $cols as $col}<th>{$col}</th>{/each}<th>Tarih</th><th>İşlem</th></tr></thead>
 <tbody>
-{#each $rows as $r}<tr>{#each $r.vals as $v}<td>{$v}</td>{/each}</tr>{/each}
+{#each $rows as $r}<tr>
+  <td>{$r.id}</td>
+  <td>
+    {#if $r.is_acik}<span class="st-badge st-acik">Açık</span>{/if}
+    {#if $r.is_islemde}<span class="st-badge st-islemde">İşlemde</span>{/if}
+    {#if $r.is_kapali}<span class="st-badge st-kapali">Kapalı</span>{/if}
+  </td>
+  {#each $r.vals as $v}<td class="sub-val">{$v}</td>{/each}
+  <td class="sub-meta">{$r.created}{#if $r.has_updated}<br>günc. {$r.updated}{/if}</td>
+  <td>
+    <div class="sub-actions">
+      <form method="post" action="/admin/form/{$fkey}">
+        <input type="hidden" name="sub_id" value="{$r.id}"><input type="hidden" name="action" value="status"><input type="hidden" name="return_status" value="{$sf}">
+        <select name="status">
+          <option value="acik"{#if $r.is_acik} selected{/if}>Açık</option>
+          <option value="islemde"{#if $r.is_islemde} selected{/if}>İşlemde</option>
+          <option value="kapali"{#if $r.is_kapali} selected{/if}>Kapalı</option>
+        </select>
+        <button type="submit">Durum</button>
+      </form>
+      <form method="post" action="/admin/form/{$fkey}">
+        <input type="hidden" name="sub_id" value="{$r.id}"><input type="hidden" name="action" value="note"><input type="hidden" name="return_status" value="{$sf}">
+        <input type="text" name="note" placeholder="Not ekle…" required>
+        <button type="submit">Not</button>
+      </form>
+      <form method="post" action="/admin/form/{$fkey}" onsubmit="return confirm('Bu gönderim silinsin mi?')">
+        <input type="hidden" name="sub_id" value="{$r.id}"><input type="hidden" name="action" value="delete"><input type="hidden" name="return_status" value="{$sf}">
+        <button type="submit" class="danger">Sil</button>
+      </form>
+    </div>
+    {#if $r.has_notes}<div class="sub-notes">{$r.notes}</div>{/if}
+  </td>
+</tr>{/each}
 </tbody>
 </table></div>
+<p class="muted" style="font-size:12px;margin-top:10px">Liste en son 500 gönderimi gösterir; CSV dışa aktarım filtreye uyan tüm satırları içerir (UTF-8 BOM, Excel uyumlu).</p>
 {/block}

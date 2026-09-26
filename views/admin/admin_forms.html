@@ -1,19 +1,38 @@
 {#extends "views/admin/layout"}
 {#block "content"}
+<style>
+ .st-counts{white-space:nowrap;font-size:12px}
+ .st-counts span{display:inline-block;padding:1px 7px;border-radius:20px;margin-right:3px;font-weight:600}
+ .st-acik{background:#fee2e2;color:#991b1b}
+ .st-islemde{background:#fef3c7;color:#92400e}
+ .st-kapali{background:#dcfce7;color:#166534}
+</style>
 <div class="section-head"><h2>Formlar <span class="muted">({$count})</span></h2></div>
 {#if $count == 0}<p class="muted">Henüz tanımlı form yok. Aşağıdan oluşturun.</p>{/if}
 <div class="table-wrap"><table>
-<thead><tr><th>Form</th><th>Anahtar</th><th>Alan</th><th>Gönderim</th><th></th></tr></thead>
+<thead><tr><th>Form</th><th>Anahtar</th><th>Alan</th><th>Gönderim</th><th>Durum</th><th></th></tr></thead>
 <tbody>
-{#each $items as $f}<tr><td><b>{$f.title}</b></td><td><code>{$f.fkey}</code> &middot; <a href="/forms/{$f.fkey}" target="_blank">/forms/{$f.fkey}</a></td><td>{$f.nfields}</td><td>{$f.nsubs}</td><td><a href="/admin/form/{$f.fkey}">Gönderimler</a></td></tr>{/each}
+{#each $items as $f}<tr>
+  <td><b>{$f.title}</b></td>
+  <td><code>{$f.fkey}</code> &middot; <a href="/forms/{$f.fkey}" target="_blank">/forms/{$f.fkey}</a></td>
+  <td>{$f.nfields}</td>
+  <td>{$f.nsubs}</td>
+  <td class="st-counts"><a href="/admin/form/{$f.fkey}?status=acik" title="Açık"><span class="st-acik">{$f.n_acik} açık</span></a><a href="/admin/form/{$f.fkey}?status=islemde" title="İşlemde"><span class="st-islemde">{$f.n_islemde} işlemde</span></a><a href="/admin/form/{$f.fkey}?status=kapali" title="Kapalı"><span class="st-kapali">{$f.n_kapali} kapalı</span></a></td>
+  <td><a href="/admin/form/{$f.fkey}">Gönderimler</a> &middot; <a href="/admin/form/{$f.fkey}?export=csv">CSV</a></td>
+</tr>{/each}
 </tbody>
 </table></div>
 
 {#if $has_other}<h3>Tanımsız gönderimler</h3>
 <div class="table-wrap"><table>
-<thead><tr><th>Anahtar</th><th>Gönderim</th><th></th></tr></thead>
+<thead><tr><th>Anahtar</th><th>Gönderim</th><th>Durum</th><th></th></tr></thead>
 <tbody>
-{#each $other as $o}<tr><td><code>{$o.fkey}</code></td><td>{$o.nsubs}</td><td><a href="/admin/form/{$o.fkey}">Gönderimler</a></td></tr>{/each}
+{#each $other as $o}<tr>
+  <td><code>{$o.fkey}</code></td>
+  <td>{$o.nsubs}</td>
+  <td class="st-counts"><span class="st-acik">{$o.n_acik} açık</span><span class="st-islemde">{$o.n_islemde} işlemde</span><span class="st-kapali">{$o.n_kapali} kapalı</span></td>
+  <td><a href="/admin/form/{$o.fkey}">Gönderimler</a> &middot; <a href="/admin/form/{$o.fkey}?export=csv">CSV</a></td>
+</tr>{/each}
 </tbody>
 </table></div>{/if}
 
@@ -28,5 +47,5 @@
 ]</textarea></div>
   <button type="submit">Form oluştur</button>
 </form>
-<p class="muted" style="font-size:13px;margin-top:10px">Alan tipleri: <code>text · email · tel · textarea</code>. Form <code>/forms/&lt;anahtar&gt;</code> adresinde yayımlanır (honeypot spam korumalı).</p>
+<p class="muted" style="font-size:13px;margin-top:10px">Alan tipleri: <code>text · email · tel · url · textarea</code>. Form <code>/forms/&lt;anahtar&gt;</code> adresinde yayımlanır (honeypot spam korumalı). Gönderimler destek bileti gibi izlenir: <b>açık → işlemde → kapalı</b>, not eklenebilir, CSV olarak dışa aktarılır.</p>
 {/block}

@@ -117,6 +117,14 @@ db::exec($c, "CREATE INDEX IF NOT EXISTS idx_content_publish_at ON content(publi
 // opsiyonel; eksikler load_type() içinde varsayılanla dolar (src/types.lk).
 ensure_column($c, "content_types", "config_json", "TEXT");
 
+// Wave 2 — İletişim modülü: gönderim yaşam döngüsü (Destek Biletleri). status
+// acik|islemde|kapali, notes düz metin (satır-satır eklenir), updated_at son işlem.
+// Eski satırlar DEFAULT ile 'acik' kalır; idempotent.
+ensure_column($c, "form_submissions", "status", "VARCHAR(20) DEFAULT 'acik'");
+ensure_column($c, "form_submissions", "notes", "TEXT");
+ensure_column($c, "form_submissions", "updated_at", "INTEGER DEFAULT 0");
+db::exec($c, "CREATE INDEX IF NOT EXISTS idx_form_subs_key_status ON form_submissions(form_key, status)", []);
+
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
 // /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently
@@ -255,6 +263,11 @@ function seed_demo_item($c, $type, $slug, $lang, $title, $body, $fields) {
     db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $rid, $cid]);
     return 1;
 }
+// Form tanımı seed'i: fkey varsa dokunma (idempotent).
+function seed_form($c, $key, $title, $fields) {
+    if (count(db::query($c, "SELECT id FROM forms WHERE fkey = ?", [$key])) > 0) { return; }
+    db::exec($c, "INSERT INTO forms (fkey, title, fields_json, created_at) VALUES (?, ?, ?, ?)", [$key, $title, json::encode($fields), date::timestamp()]);
+}
 if (env("LOOKPRESS_SEED", "0") == "1") {
     // Core demo: a plain page + a few example content types so the grouped
     // "İçerik Yönetimi" sidebar is visible out of the box. Each is a full module
@@ -264,16 +277,29 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
     seed_type($c, "haber",  "Haberler",  "/haber/{slug}",  $common);
     seed_type($c, "duyuru", "Duyurular", "/duyuru/{slug}", $common);
     seed_type($c, "ekip",   "Ekipler",   "/ekip/{slug}",   $common);
-    // demo form (form builder) — visible at /forms/basvuru
-    if (count(db::query($c, "SELECT id FROM forms WHERE fkey = 'basvuru'", [])) == 0) {
-        db::exec($c, "INSERT INTO forms (fkey, title, fields_json, created_at) VALUES ('basvuru', 'İş Başvurusu', ?, ?)", [json::encode([
-            ["name" => "ad",      "label" => "Ad Soyad", "type" => "text",     "required" => true],
-            ["name" => "email",   "label" => "E-posta",  "type" => "email",    "required" => true],
-            ["name" => "telefon", "label" => "Telefon",  "type" => "tel",      "required" => false],
-            ["name" => "mesaj",   "label" => "Mesaj",    "type" => "textarea", "required" => false]
-        ]), date::timestamp()]);
-    }
-    print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) + demo form (basvuru) ===\n");
+    // demo forms (form builder) — visible at /forms/<key>; idempotent (fkey unique)
+    seed_form($c, "basvuru", "İş Başvurusu", [
+        ["name" => "ad",      "label" => "Ad Soyad", "type" => "text",     "required" => true],
+        ["name" => "email",   "label" => "E-posta",  "type" => "email",    "required" => true],
+        ["name" => "telefon", "label" => "Telefon",  "type" => "tel",      "required" => false],
+        ["name" => "mesaj",   "label" => "Mesaj",    "type" => "textarea", "required" => false]
+    ]);
+    // Wave 2 — İletişim grubu gerçek olsun: iletişim formu + iş başvurusu (cv_url)
+    seed_form($c, "iletisim", "İletişim", [
+        ["name" => "ad",    "label" => "Ad Soyad", "type" => "text",     "required" => true],
+        ["name" => "email", "label" => "E-posta",  "type" => "email",    "required" => true],
+        ["name" => "konu",  "label" => "Konu",     "type" => "text",     "required" => true],
+        ["name" => "mesaj", "label" => "Mesaj",    "type" => "textarea", "required" => true]
+    ]);
+    seed_form($c, "is-basvuru", "İş Başvurusu", [
+        ["name" => "ad",       "label" => "Ad Soyad",      "type" => "text",     "required" => true],
+        ["name" => "email",    "label" => "E-posta",       "type" => "email",    "required" => true],
+        ["name" => "telefon",  "label" => "Telefon",       "type" => "tel",      "required" => false],
+        ["name" => "pozisyon", "label" => "Pozisyon",      "type" => "text",     "required" => true],
+        ["name" => "cv_url",   "label" => "CV bağlantısı", "type" => "url",      "required" => false],
+        ["name" => "mesaj",    "label" => "Mesaj",         "type" => "textarea", "required" => false]
+    ]);
+    print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) + demo forms (basvuru/iletisim/is-basvuru) ===\n");
 }
 // Extensions seed their own demo data (commerce overrides xp_seed → product type +
 // demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.
