@@ -68,12 +68,9 @@ function theme_globals($c) {
         if ($v == null) { $v = ""; }
         $g[$m[0]] = $v;
     }
-    $links = [];
-    $raw = setting_get($c, "sabit_footer_links", "");
-    if ($raw != null && $raw != "") {
-        $dec = json::decode($raw);
-        if ($dec != null) { $links = $dec; }
-    }
+    // Footer bağlantıları bir MENÜ'dür (Menü yönetimi → footer konumu), ayar değil.
+    $links = menu_items($c, "footer");
+    if ($links == null) { $links = []; }
     $g["footer_links"] = $links;
     $g["has_footer_links"] = (count($links) > 0);
     $g["has_announcement"] = ($g["announcement"] != "");

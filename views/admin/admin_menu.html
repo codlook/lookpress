@@ -1,8 +1,11 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>Menü <span class="muted">(birincil)</span></h2></div>
-<p class="muted" style="font-size:13px;margin:0 0 14px">Sitenin üst menüsü. Boş satırlar yok sayılır. URL örnekleri: <code>/product</code>, <code>/blog</code>, <code>/contact</code>, <code>/haber</code>, <code>/hakkimizda</code>.</p>
+<div class="section-head"><h2>Menü{#if $is_primary} <span class="muted">(üst menü)</span>{/if}{#if $is_footer} <span class="muted">(footer bağlantıları)</span>{/if}</h2></div>
+<nav style="display:flex;gap:8px;margin:0 0 14px"><a class="btn-sm" href="/admin/menu?loc=primary"{#if $is_primary} style="font-weight:700;text-decoration:underline"{/if}>Üst menü</a><a class="btn-sm" href="/admin/menu?loc=footer"{#if $is_footer} style="font-weight:700;text-decoration:underline"{/if}>Footer bağlantıları</a></nav>
+{#if $is_primary}<p class="muted" style="font-size:13px;margin:0 0 14px">Sitenin üst menüsü. Boş satırlar yok sayılır. URL örnekleri: <code>/product</code>, <code>/blog</code>, <code>/contact</code>, <code>/haber</code>, <code>/hakkimizda</code>.</p>{/if}
+{#if $is_footer}<p class="muted" style="font-size:13px;margin:0 0 14px">Sitenin alt bilgisinde (footer) görünen bağlantılar. Boş satırlar yok sayılır.</p>{/if}
 <form method="post" action="/admin/menu" class="menu-form">
+<input type="hidden" name="location" value="{$loc}">
 {#each $slots as $s}<div class="menu-row"><input name="label_{$s.n}" value="{$s.label}" placeholder="Etiket"><input name="url_{$s.n}" value="{$s.url}" placeholder="/adres"></div>
 {/each}
 <button type="submit">Kaydet</button>

@@ -436,11 +436,15 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
     seed_setting_default($c, "contact_email", "info@ornek-insaat.com");
     seed_setting_default($c, "contact_phone", "+90 212 000 00 00");
     seed_setting_default($c, "sabit_footer_text", "© Örnek İnşaat A.Ş. Tüm hakları saklıdır.");
-    seed_setting_default($c, "sabit_footer_links", json::encode([
-        ["label" => "Hakkımızda", "url" => "/hakkimizda"],
-        ["label" => "İletişim",   "url" => "/contact"],
-        ["label" => "Blog",       "url" => "/blog"]
-    ]));
+    // Footer bağlantıları bir menüdür (location=footer), ayar değil. Eski kurulumda
+    // sabit_footer_links ayarı varsa varsayılanı BASMA — dosya sonundaki taşıma onu menüye alır.
+    if (count(db::query($c, "SELECT id FROM settings WHERE ns = 'core' AND skey = 'sabit_footer_links'", [])) == 0) {
+        seed_menu_if_empty($c, "footer", [
+            ["label" => "Hakkımızda", "url" => "/hakkimizda"],
+            ["label" => "İletişim",   "url" => "/contact"],
+            ["label" => "Blog",       "url" => "/blog"]
+        ]);
+    }
     seed_setting_default($c, "sabit_social_linkedin", "https://www.linkedin.com/company/ornek-insaat");
     seed_setting_default($c, "seo_description", "Örnek İnşaat — konut, ofis ve endüstriyel yapılarda 25 yıllık deneyim.");
 
@@ -509,4 +513,12 @@ if ($existing == 0) {
     print("=== TOTAL body_html diffs: " . $total_diffs . " (0 = clean golden-gate migration) ===\n");
 } else {
     print("=== v2 content present (" . $existing . " rows) — skipping v1->v2 row migration ===\n");
+}
+
+// Tek-seferlik taşıma: eski kurulumlarda footer bağlantıları bir AYAR (sabit_footer_links)
+// olarak saklanıyordu; artık bir MENÜ (location=footer). Footer menüsü boşsa ayardan doldur.
+$old_fl = db::query($c, "SELECT sval FROM settings WHERE ns = 'core' AND skey = 'sabit_footer_links'", []);
+if (count($old_fl) > 0) {
+    $old_items = json::decode($old_fl[0]["sval"]);
+    if ($old_items != null && type::is_array($old_items) && count($old_items) > 0) { seed_menu_if_empty($c, "footer", $old_items); }
 }

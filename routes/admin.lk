@@ -790,32 +790,39 @@ route("GET", "/admin/menu", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
-    $items = menu_items($c, "primary");
+    // Menü konumu: primary (üst menü) | footer (alt bilgi bağlantıları) — ?loc= ile seçilir.
+    // Footer bağlantıları bir menüdür, ayar değil; burada yönetilir, tema footer'da basar.
+    $loc = request::get("loc"); if ($loc != "footer") { $loc = "primary"; }
+    $items = menu_items($c, $loc);
     $slots = [];
     foreach ([0, 1, 2, 3, 4, 5, 6, 7] as $idx) {
         $lbl = ""; $url = "";
         if ($idx < count($items)) { $lbl = $items[$idx]["label"]; $url = $items[$idx]["url"]; }
         $slots = array::push($slots, ["n" => $idx, "label" => $lbl, "url" => $url]);
     }
-    return response::html(admin_view("admin_menu.html", ["slots" => $slots]));
+    return response::html(admin_view("admin_menu.html", ["slots" => $slots, "loc" => $loc, "is_primary" => ($loc == "primary"), "is_footer" => ($loc == "footer")]));
 });
 route("POST", "/admin/menu", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
+    $loc = request::post("location"); if ($loc != "footer") { $loc = "primary"; }
     $items = [];
     foreach ([0, 1, 2, 3, 4, 5, 6, 7] as $idx) {
-        $lbl = string::trim(request::post("label_" . $idx));
-        $url = string::trim(request::post("url_" . $idx));
+        // Gönderilmeyen satırda request::post null döner; string::trim(null) "null" STRİNGİ
+        // üretir ve çöp kayıt yazılırdı — önce null kontrolü.
+        $lbl = request::post("label_" . $idx); if ($lbl == null) { $lbl = ""; }
+        $url = request::post("url_" . $idx);   if ($url == null) { $url = ""; }
+        $lbl = string::trim($lbl); $url = string::trim($url);
         if ($lbl != "" && $url != "") { $items = array::push($items, ["label" => $lbl, "url" => $url]); }
     }
     $ij = json::encode($items);
-    if (count(db::query($c, "SELECT id FROM menus WHERE location = 'primary'", [])) > 0) {
-        db::exec($c, "UPDATE menus SET items_json = ? WHERE location = 'primary'", [$ij]);
+    if (count(db::query($c, "SELECT id FROM menus WHERE location = ?", [$loc])) > 0) {
+        db::exec($c, "UPDATE menus SET items_json = ? WHERE location = ?", [$ij, $loc]);
     } else {
-        db::exec($c, "INSERT INTO menus (location, items_json) VALUES ('primary', ?)", [$ij]);
+        db::exec($c, "INSERT INTO menus (location, items_json) VALUES (?, ?)", [$loc, $ij]);
     }
-    return response::redirect("/admin/menu");
+    return response::redirect("/admin/menu?loc=" . $loc);
 });
 
 // ── admin: settings (role 'admin' only) ──────────────────────────────────────
@@ -848,7 +855,6 @@ route("GET", "/admin/settings", function() {
     $dl = setting_get($c, "default_lang", "tr");
     $data = array::set($data, "lang_tr", ($dl != "en"));
     $data = array::set($data, "lang_en", ($dl == "en"));
-    $data = array::set($data, "s_footer_links_text", footer_links_text(setting_get($c, "sabit_footer_links", "[]")));
     $saved = request::get("saved"); $data = array::set($data, "saved", ($saved == "1"));
     $tab = request::get("tab"); if ($tab == null || $tab == "") { $tab = "genel"; }
     $data = array::set($data, "tab", $tab);
@@ -861,33 +867,6 @@ function settings_text_keys() {
             "seo_description", "seo_og_image", "robots_extra", "analytics_head",
             "sabit_footer_text", "sabit_header_announcement",
             "sabit_social_instagram", "sabit_social_facebook", "sabit_social_x", "sabit_social_youtube", "sabit_social_linkedin"];
-}
-// Footer bağlantıları: textarea'da satır başına "Etiket | /url" ↔ JSON [{label,url}].
-function footer_links_parse($text) {
-    $out = [];
-    if ($text == null) { return $out; }
-    foreach (string::split($text, "\n") as $ln) {
-        $ln = string::trim($ln);
-        if ($ln == "") { continue; }
-        $parts = string::split($ln, "|");
-        if (count($parts) < 2) { continue; }
-        $lbl = string::trim($parts[0]); $url = string::trim($parts[1]);
-        if ($lbl == "" || $url == "") { continue; }
-        $out = array::push($out, ["label" => $lbl, "url" => $url]);
-    }
-    return $out;
-}
-function footer_links_text($json) {
-    $arr = json::decode($json); if ($arr == null || !type::is_array($arr)) { return ""; }
-    $lines = [];
-    foreach ($arr as $l) {
-        $lbl = ""; $url = "";
-        if (array::contains(array::keys($l), "label")) { $lbl = $l["label"]; }
-        if (array::contains(array::keys($l), "url")) { $url = $l["url"]; }
-        if ($lbl == null) { $lbl = ""; } if ($url == null) { $url = ""; }
-        $lines = array::push($lines, $lbl . " | " . $url);
-    }
-    return string::join($lines, "\n");
 }
 route("POST", "/admin/settings", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -908,7 +887,6 @@ route("POST", "/admin/settings", function() {
     }
     $dl = request::post("default_lang"); if ($dl != "en") { $dl = "tr"; }
     setting_set($c, "default_lang", $dl);
-    setting_set($c, "sabit_footer_links", json::encode(footer_links_parse(request::post("footer_links_text"))));
     settings_bust();
     $tab = request::post("tab"); if ($tab == null || $tab == "") { $tab = "genel"; }
     if (!string::regex_match($tab, "^[a-z]+$")) { $tab = "genel"; }
