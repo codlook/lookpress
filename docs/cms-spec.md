@@ -142,7 +142,7 @@ VM off, and the route budget stays at ≤ 69.
 - ✅ Email flows via core `mail::` (never-throwing wrapper): form-submission notification, order confirmation (+ copy to contact_email), member password reset (single-use 60-min tokens, no enumeration; dev-mode link log when no mailer). Configure `MAIL_PROVIDER` + provider env to enable.
 - ✅ Member deactivation (`POST /admin/uyeler`) · real 404 pages.
 - ✅ Backups (Wave 2).
-- ⬜ **Deploy to test.codlook.com** (with `LOOK_BYTECODE=0` in the service env).
+- ✅ **Deployed to test.codlook.com** (2026-09-26): clean source snapshot from HEAD, `LOOK_BYTECODE=0` in the service env, migrations + demo seed as the panel user, data/uploads preserved, pre-deploy backups in `/root/lookpress-backups/`. Live pages verified (home with 53 components, modules, /en, 404, members, admin) with CSP/X-Frame/HSTS present.
 - ⬜ WXR importer, FTS5 search, product-layer benchmarks, security audit pass (next).
 - ⬜ Per-vertical demo presets (haber-sitesi / e-ticaret) as one-click seeds.
 
