@@ -363,26 +363,20 @@ route("GET", "/admin/users", function() {
     $me = type::to_int(session::get("uid"));
     $c = conn();
     $users = db::query($c, "SELECT id, username, role FROM users ORDER BY id", []);
-    $rows = "";
+    $roles = all_roles($c);
+    $items = [];
     foreach ($users as $u) {
-        $uid = $u["id"];
-        $is_me = (type::to_int($uid) == $me);
-        $you = ""; if ($is_me) { $you = " <span class=\"badge\">siz</span>"; }
-        // role select — every defined role (dynamic)
-        $rsel = "<form method=\"post\" action=\"/admin/users/" . $uid . "/role\" class=\"inline urow\">"
-              . "<select name=\"role\">" . role_options($c, $u["role"]) . "</select>"
-              . " <button class=\"btn-sm\">Rolü kaydet</button></form>";
-        // reset password
-        $pform = "<form method=\"post\" action=\"/admin/users/" . $uid . "/password\" class=\"inline urow\">"
-               . "<input type=\"password\" name=\"password\" placeholder=\"yeni şifre\" style=\"width:130px\"> <button class=\"btn-sm\">Sıfırla</button></form>";
-        // delete (not self)
-        $dform = "";
-        if (!$is_me) {
-            $dform = "<form method=\"post\" action=\"/admin/users/" . $uid . "/delete\" class=\"inline urow\" onsubmit=\"return confirm('Bu kullanıcı silinsin mi?')\"><button class=\"del\">Sil</button></form>";
+        $is_me = (type::to_int($u["id"]) == $me);
+        $ropts = [];
+        foreach ($roles as $r) {
+            $ropts = array::push($ropts, ["name" => $r["name"], "label" => $r["label"], "selected" => ($r["name"] == $u["role"])]);
         }
-        $rows = $rows . "<tr><td><b>" . html::escape($u["username"]) . "</b>" . $you . "</td><td>" . $rsel . "</td><td>" . $pform . " " . $dform . "</td></tr>";
+        $items = array::push($items, ["id" => $u["id"], "username" => $u["username"], "is_me" => $is_me, "can_delete" => !$is_me, "roles" => $ropts]);
     }
-    return response::html(admin_view("admin_users.html", ["rows" => $rows, "count" => count($users), "role_options" => role_options($c, "editor")]));
+    // new-user role options as data
+    $new_roles = [];
+    foreach ($roles as $r) { $new_roles = array::push($new_roles, ["name" => $r["name"], "label" => $r["label"], "selected" => ($r["name"] == "editor")]); }
+    return response::html(admin_view("admin_users.html", ["items" => $items, "count" => count($users), "new_roles" => $new_roles]));
 });
 // Change a user's role (guard: can't demote the last admin).
 route("POST", "/admin/users/{id}/role", function() {
@@ -461,31 +455,21 @@ route("GET", "/admin/roles", function() {
     $perms = all_permissions();
     $roles = all_roles($c);
     $rows = "";
+    $items = [];
     foreach ($roles as $r) {
         $rp = json::decode($r["perms"]); if ($rp == null) { $rp = []; }
         $sys = (type::to_int($r["is_system"]) == 1);
         $is_admin_role = ($r["name"] == "admin");
-        $cbs = "";
+        $plist = [];
         foreach ($perms as $p) {
-            $ck = "";
-            if ($is_admin_role) { $ck = " checked disabled"; }
-            else { if (array::contains($rp, $p["key"])) { $ck = " checked"; } }
-            $cbs = $cbs . "<label class=\"pcb\"><input type=\"checkbox\" name=\"perm_" . $p["key"] . "\" value=\"1\"" . $ck . "> " . html::escape($p["label"]) . "</label>";
+            $checked = false;
+            if ($is_admin_role) { $checked = true; } else { $checked = array::contains($rp, $p["key"]); }
+            $plist = array::push($plist, ["key" => $p["key"], "label" => $p["label"], "checked" => $checked]);
         }
-        $badge = ""; if ($sys) { $badge = " <span class=\"badge\">sistem</span>"; }
-        $cell = "";
-        if ($is_admin_role) {
-            $cell = "<div class=\"pgrid muted\">" . $cbs . "</div><span class=\"muted\">Süper kullanıcı — tüm yetkiler.</span>";
-        } else {
-            $cell = "<form method=\"post\" action=\"/admin/roles/" . $r["id"] . "/save\"><div class=\"pgrid\">" . $cbs . "</div><button class=\"btn-sm\">Kaydet</button></form>";
-        }
-        $del = "";
-        if (!$sys) { $del = "<form method=\"post\" action=\"/admin/roles/" . $r["id"] . "/delete\" class=\"inline\" onsubmit=\"return confirm('Rol silinsin mi?')\"><button class=\"del\">Sil</button></form>"; }
-        $rows = $rows . "<tr><td><b>" . html::escape($r["label"]) . "</b>" . $badge . "<br><code>" . html::escape($r["name"]) . "</code></td><td>" . $cell . "</td><td>" . $del . "</td></tr>";
+        $items = array::push($items, ["id" => $r["id"], "name" => $r["name"], "label" => $r["label"],
+            "is_system" => $sys, "is_admin" => $is_admin_role, "editable" => !$is_admin_role, "can_delete" => !$sys, "perms" => $plist]);
     }
-    $newcbs = "";
-    foreach ($perms as $p) { $newcbs = $newcbs . "<label class=\"pcb\"><input type=\"checkbox\" name=\"perm_" . $p["key"] . "\" value=\"1\"> " . html::escape($p["label"]) . "</label>"; }
-    return response::html(admin_view("admin_roles.html", ["rows" => $rows, "count" => count($roles), "new_perms" => $newcbs]));
+    return response::html(admin_view("admin_roles.html", ["items" => $items, "count" => count($roles), "new_perms" => $perms]));
 });
 route("POST", "/admin/roles/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }

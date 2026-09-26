@@ -4,7 +4,13 @@
 <p class="muted" style="font-size:13px;margin:0 0 12px">Her rol bir yetki kümesidir. <b>Yönetici</b> tüm yetkilere sahiptir (süper kullanıcı). Kullanıcılara <a href="/admin/users">Kullanıcılar</a> ekranından rol atarsınız.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Rol</th><th>Yetkiler</th><th></th></tr></thead>
-<tbody>{!$rows}</tbody>
+<tbody>
+{#each $items as $r}<tr>
+<td><b>{$r.label}</b>{#if $r.is_system} <span class="badge">sistem</span>{/if}<br><code>{$r.name}</code></td>
+<td>{#if $r.is_admin}<div class="pgrid muted">{#each $r.perms as $p}<label class="pcb"><input type="checkbox" checked disabled> {$p.label}</label>{/each}</div><span class="muted">Süper kullanıcı — tüm yetkiler.</span>{/if}{#if $r.editable}<form method="post" action="/admin/roles/{$r.id}/save"><div class="pgrid">{#each $r.perms as $p}<label class="pcb"><input type="checkbox" name="perm_{$p.key}" value="1"{#if $p.checked} checked{/if}> {$p.label}</label>{/each}</div><button class="btn-sm">Kaydet</button></form>{/if}</td>
+<td>{#if $r.can_delete}<form method="post" action="/admin/roles/{$r.id}/delete" class="inline" onsubmit="return confirm('Rol silinsin mi?')"><button class="del">Sil</button></form>{/if}</td>
+</tr>{/each}
+</tbody>
 </table></div>
 
 <h3>Yeni rol</h3>
@@ -13,7 +19,7 @@
     <label>Ad (slug) <input name="name" placeholder="ör. yazar" required></label>
     <label>Etiket <input name="label" placeholder="ör. Yazar"></label>
   </div>
-  <div class="pgrid">{!$new_perms}</div>
+  <div class="pgrid">{#each $new_perms as $p}<label class="pcb"><input type="checkbox" name="perm_{$p.key}" value="1"> {$p.label}</label>{/each}</div>
   <button type="submit">Rol oluştur</button>
 </form>
 {/block}

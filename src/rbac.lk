@@ -43,13 +43,3 @@ function collect_perms() {
     }
     return $out;
 }
-
-// Build <option>s of all roles for a <select name="role"> ($sel = selected name).
-function role_options($c, $sel) {
-    $o = "";
-    foreach (all_roles($c) as $r) {
-        $s = ""; if ($r["name"] == $sel) { $s = " selected"; }
-        $o = $o . "<option value=\"" . $r["name"] . "\"" . $s . ">" . html::escape($r["label"]) . "</option>";
-    }
-    return $o;
-}

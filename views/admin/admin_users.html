@@ -3,7 +3,13 @@
 <div class="section-head"><h2>Kullanıcılar <span class="muted">({$count})</span></h2></div>
 <div class="table-wrap"><table>
 <thead><tr><th>Kullanıcı</th><th>Rol</th><th>İşlemler</th></tr></thead>
-<tbody>{!$rows}</tbody>
+<tbody>
+{#each $items as $u}<tr>
+<td><b>{$u.username}</b>{#if $u.is_me} <span class="badge">siz</span>{/if}</td>
+<td><form method="post" action="/admin/users/{$u.id}/role" class="inline urow"><select name="role">{#each $u.roles as $r}<option value="{$r.name}"{#if $r.selected} selected{/if}>{$r.label}</option>{/each}</select> <button class="btn-sm">Rolü kaydet</button></form></td>
+<td><form method="post" action="/admin/users/{$u.id}/password" class="inline urow"><input type="password" name="password" placeholder="yeni şifre" style="width:130px"> <button class="btn-sm">Sıfırla</button></form>{#if $u.can_delete} <form method="post" action="/admin/users/{$u.id}/delete" class="inline urow" onsubmit="return confirm('Bu kullanıcı silinsin mi?')"><button class="del">Sil</button></form>{/if}</td>
+</tr>{/each}
+</tbody>
 </table></div>
 
 <h3>Yeni kullanıcı</h3>
@@ -11,7 +17,7 @@
   <label>Kullanıcı adı <input type="text" name="username" required></label>
   <label>Şifre <input type="password" name="password" required></label>
   <label>Rol
-    <select name="role">{!$role_options}</select>
+    <select name="role">{#each $new_roles as $r}<option value="{$r.name}"{#if $r.selected} selected{/if}>{$r.label}</option>{/each}</select>
   </label>
   <button type="submit">Ekle</button>
 </form>
