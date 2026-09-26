@@ -1,0 +1,297 @@
+// src/dashboard.lk — admin paneli (GET /admin) için veri toplama. SADECE fonksiyon,
+// route YOK (route bütçesi). dashboard_data($c) tek bir assoc döner; şablon
+// (views/admin/admin_dashboard.html) yalnız döngü/yazdırma yapar — her boolean ve
+// biçimlenmiş metin burada önceden hesaplanır ({#else} yok, bu yüzden has_* bayrakları).
+//
+// Opsiyonel tablolar (orders, members) ve henüz gelmemiş sütunlar
+// (form_submissions.status) try/catch ile korunur: tablo yoksa 0 / boş liste.
+use db;
+use session;
+use json;
+use date;
+use array;
+use type;
+use string;
+use math;
+
+// ── küçük biçim yardımcıları ─────────────────────────────────────────────────
+// Unix zaman damgası (int/string) → "dd.mm.yyyy HH:MM"; 0/boş → "—".
+function dash_fmt_ts($v) {
+    if ($v == null) { return "—"; }
+    $ts = type::to_int($v);
+    if ($ts <= 0) { return "—"; }
+    return date::format($ts, "d.m.Y H:i");
+}
+// Tam sayıyı binlik ayraçla yaz: 1234567 → "1.234.567".
+function dash_group_thousands($n) {
+    $s = "" . $n;
+    $len = string::len($s);
+    if ($len <= 3) { return $s; }
+    $out = "";
+    $i = $len;
+    while ($i > 3) {
+        $out = "." . string::substr($s, $i - 3, 3) . $out;
+        $i = $i - 3;
+    }
+    return string::substr($s, 0, $i) . $out;
+}
+// Para: SQLite'tan gelen float/string → "1.234,50 ₺". Geçersiz değer → "0,00 ₺".
+function dash_money($v) {
+    $f = 0.0;
+    if ($v != null) { try { $f = type::to_float($v); } catch ($e) { $f = 0.0; } }
+    $neg = false;
+    if ($f < 0) { $neg = true; $f = 0 - $f; }
+    $cents = math::round($f * 100);
+    $whole = type::to_int($cents / 100);
+    $frac = $cents - ($whole * 100);
+    $s = dash_group_thousands($whole) . "," . string::pad_left("" . $frac, 2, "0") . " ₺";
+    if ($neg) { return "-" . $s; }
+    return $s;
+}
+// Metni kırp (önizleme): uzun ise "…" ekle.
+function dash_short($s, $max) {
+    if ($s == null) { return ""; }
+    $t = string::trim(type::to_string($s));
+    if (string::len($t) <= $max) { return $t; }
+    return string::substr($t, 0, $max) . "…";
+}
+// Tek sayı sorgusu: COUNT(*)/SUM sonucunu int döndür; hata → $fallback (opsiyonel tablo/sütun).
+function dash_count($c, $sql, $params, $fallback) {
+    try {
+        $rows = db::query($c, $sql, $params);
+        if (count($rows) == 0) { return $fallback; }
+        $n = $rows[0]["n"];
+        if ($n == null) { return $fallback; }
+        return type::to_int($n);
+    } catch ($e) { return $fallback; }
+}
+// Liste sorgusu: hata (tablo yok) → boş liste.
+function dash_rows($c, $sql, $params) {
+    try { return db::query($c, $sql, $params); } catch ($e) { return []; }
+}
+// Sipariş durumu → Türkçe etiket (config/config.lk cfg_order_statuses ile aynı sözlük).
+function dash_order_status_label($s) {
+    if ($s == "received")   { return "Alındı"; }
+    if ($s == "preparing")  { return "Hazırlanıyor"; }
+    if ($s == "shipped")    { return "Kargoda"; }
+    if ($s == "delivered")  { return "Teslim edildi"; }
+    if ($s == "cancelled")  { return "İptal"; }
+    if ($s == null) { return "—"; }
+    return "" . $s;
+}
+// Form gönderimi durumu → Türkçe etiket (acik / islemde / kapali).
+function dash_sub_status_label($s) {
+    if ($s == "acik")    { return "Açık"; }
+    if ($s == "islemde") { return "İşlemde"; }
+    if ($s == "kapali")  { return "Kapalı"; }
+    if ($s == null || $s == "") { return "—"; }
+    return "" . $s;
+}
+// DB_DSN öneki → motor adı.
+function dash_db_engine() {
+    $dsn = env("DB_DSN", "sqlite://cms.db");
+    $p = string::index_of($dsn, "://");
+    $pre = $dsn; if ($p > 0) { $pre = string::substr($dsn, 0, $p); }
+    $pre = string::lower($pre);
+    if ($pre == "sqlite") { return "SQLite"; }
+    if ($pre == "mysql")  { return "MySQL"; }
+    if ($pre == "pg" || $pre == "postgres" || $pre == "postgresql") { return "PostgreSQL"; }
+    return $pre;
+}
+
+// ── 1. modül sayaçları (grup grup kutucuklar) ─────────────────────────────────
+// Her content_types satırı bir kutucuk: yayında / taslak sayısı + config'den ikon ve
+// çoğul etiket. Gizli tipler (xp_hidden_types → product) ATLANMAZ; grup config'i
+// varsayılan (icerik) kalmışsa uzantı grubuna (ecommerce) taşınır — sidebar ile tutarlı.
+function dash_module_groups($c) {
+    $hidden = xp_hidden_types();
+    $rows = db::query($c, "SELECT slug, label, config_json FROM content_types ORDER BY label", []);
+    $tiles = [];
+    foreach ($rows as $r) {
+        $slug = $r["slug"];
+        $cfg = type_config_decode($slug, $r["label"], $r["config_json"]);
+        $grp = $cfg["group"];
+        if (array::contains($hidden, $slug) && $grp == "icerik") { $grp = "ecommerce"; }
+        $pub = dash_count($c, "SELECT COUNT(*) AS n FROM content WHERE type = ? AND published_rev > 0", [$slug], 0);
+        $drf = dash_count($c, "SELECT COUNT(*) AS n FROM content WHERE type = ? AND published_rev = 0", [$slug], 0);
+        $tiles = array::push($tiles, [
+            "slug" => $slug, "group" => $grp, "order" => $cfg["order"],
+            "icon" => $cfg["icon"], "label" => $cfg["plural"],
+            "published" => $pub, "drafts" => $drf, "has_drafts" => ($drf > 0),
+            "url" => "/admin/type/" . $slug, "new_url" => "/admin/type/" . $slug . "/new"
+        ]);
+    }
+    // Spec'in altı grubu, sabit sırayla; boş gruplar atlanır. Grup içi sıra: order, sonra etiket.
+    $groups = [];
+    foreach (module_groups() as $g) {
+        $in = [];
+        foreach ($tiles as $t) { if ($t["group"] == $g["key"]) { $in = array::push($in, $t); } }
+        if (count($in) == 0) { continue; }
+        $sorted = [];
+        $remaining = $in;
+        while (count($remaining) > 0) {
+            $best = null; $bi = -1; $i = 0;
+            foreach ($remaining as $t) {
+                $take = false;
+                if ($best == null) { $take = true; }
+                else {
+                    if ($t["order"] < $best["order"] || ($t["order"] == $best["order"] && $t["label"] < $best["label"])) { $take = true; }
+                }
+                if ($take) { $best = $t; $bi = $i; }
+                $i = $i + 1;
+            }
+            $sorted = array::push($sorted, $best);
+            $rest = []; $i = 0;
+            foreach ($remaining as $t) { if ($i != $bi) { $rest = array::push($rest, $t); } $i = $i + 1; }
+            $remaining = $rest;
+        }
+        $groups = array::push($groups, ["key" => $g["key"], "label" => $g["label"], "tiles" => $sorted, "count" => count($sorted)]);
+    }
+    return $groups;
+}
+
+// ── 2. iletişim (form gönderimleri) ──────────────────────────────────────────
+function dash_submissions($c) {
+    $out = array::new_assoc();
+    $out["n_subs"] = dash_count($c, "SELECT COUNT(*) AS n FROM form_submissions", [], 0);
+    // status sütunu bu dalgada başka bir ajanla geliyor: varsa açık sayısı, yoksa düz sayım + not.
+    $open = -1;
+    try {
+        $rows = db::query($c, "SELECT COUNT(*) AS n FROM form_submissions WHERE status = 'acik'", []);
+        if (count($rows) > 0) { $open = type::to_int($rows[0]["n"]); }
+    } catch ($e) { $open = -1; }
+    $out["subs_has_status"] = ($open >= 0);
+    if ($open >= 0) { $out["n_subs_open"] = $open; $out["subs_status_note"] = ""; }
+    else { $out["n_subs_open"] = $out["n_subs"]; $out["subs_status_note"] = "Durum sütunu henüz yok; toplam gösteriliyor."; }
+    // Son 5 gönderim: status varsa onunla, yoksa onsuz.
+    $rows = [];
+    try { $rows = db::query($c, "SELECT id, form_key, data_json, created_at, status FROM form_submissions ORDER BY id DESC LIMIT 5", []); }
+    catch ($e) { $rows = dash_rows($c, "SELECT id, form_key, data_json, created_at FROM form_submissions ORDER BY id DESC LIMIT 5", []); }
+    $items = [];
+    foreach ($rows as $r) {
+        // Önizleme: data_json'daki ilk değer (ad/e-posta/mesaj — form tanımı sırasına göre).
+        $preview = "";
+        $d = null;
+        try { $d = json::decode($r["data_json"]); } catch ($e) { $d = null; }
+        if ($d != null && type::is_array($d)) {
+            $ks = array::keys($d);
+            if (count($ks) > 0) { $preview = dash_short($d[$ks[0]], 60); }
+        }
+        $st = null;
+        try { $st = $r["status"]; } catch ($e) { $st = null; }
+        $fk = $r["form_key"]; if ($fk == null) { $fk = ""; }
+        $items = array::push($items, [
+            "id" => $r["id"], "form_key" => $fk, "when" => dash_fmt_ts($r["created_at"]),
+            "preview" => $preview, "status" => dash_sub_status_label($st), "is_open" => ($st == "acik"),
+            "url" => "/admin/forms/" . $fk
+        ]);
+    }
+    $out["recent_subs"] = $items;
+    $out["has_subs"] = (count($items) > 0);
+    return $out;
+}
+
+// ── 3. e-ticaret (orders tablosu opsiyonel) ──────────────────────────────────
+function dash_commerce($c) {
+    $out = array::new_assoc();
+    $n = dash_count($c, "SELECT COUNT(*) AS n FROM orders", [], -1);
+    $out["has_commerce"] = ($n >= 0);
+    if ($n < 0) { $n = 0; }
+    $out["n_orders"] = $n;
+    // Durum dağılımı (config sözlüğü sırasıyla; sıfır olanlar da listelenir — sabit satır seti).
+    $by = [];
+    $counts = array::new_assoc();
+    foreach (dash_rows($c, "SELECT status, COUNT(*) AS n FROM orders GROUP BY status", []) as $r) {
+        $s = $r["status"]; if ($s == null) { $s = ""; }
+        $counts["" . $s] = type::to_int($r["n"]);
+    }
+    foreach (cfg_order_statuses() as $s) {
+        $k = $counts[$s]; if ($k == null) { $k = 0; }
+        $by = array::push($by, ["status" => $s, "label" => dash_order_status_label($s), "n" => $k]);
+    }
+    $out["orders_by_status"] = $by;
+    // Ciro: iptal edilmemiş siparişlerin toplamı (total VARCHAR → SQLite SUM sayıya çevirir).
+    $rev = 0.0;
+    try {
+        $rows = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders WHERE status != 'cancelled'", []);
+        if (count($rows) > 0) { $rev = type::to_float($rows[0]["r"]); }
+    } catch ($e) { $rev = 0.0; }
+    $out["revenue"] = dash_money($rev);
+    // Son 5 sipariş.
+    $items = [];
+    foreach (dash_rows($c, "SELECT id, email, cust_name, total, status, created_at FROM orders ORDER BY id DESC LIMIT 5", []) as $o) {
+        $cn = $o["cust_name"]; if ($cn == null) { $cn = ""; }
+        $em = $o["email"]; if ($em == null) { $em = ""; }
+        $who = $cn; if ($who == "") { $who = $em; } if ($who == "") { $who = "—"; }
+        $items = array::push($items, [
+            "id" => $o["id"], "customer" => $who, "email" => $em,
+            "total" => dash_money($o["total"]), "status" => dash_order_status_label($o["status"]),
+            "status_key" => "" . $o["status"], "when" => dash_fmt_ts($o["created_at"]),
+            "url" => "/admin/order/" . $o["id"]
+        ]);
+    }
+    $out["recent_orders"] = $items;
+    $out["has_orders"] = (count($items) > 0);
+    return $out;
+}
+
+// ── 4. üyeler (members tablosu opsiyonel — tembel kurulur) ───────────────────
+function dash_members($c) {
+    $out = array::new_assoc();
+    $out["n_members"] = dash_count($c, "SELECT COUNT(*) AS n FROM members", [], 0);
+    $items = [];
+    foreach (dash_rows($c, "SELECT id, email, name, created_at FROM members ORDER BY id DESC LIMIT 5", []) as $m) {
+        $nm = $m["name"]; if ($nm == null) { $nm = ""; }
+        $em = $m["email"]; if ($em == null) { $em = ""; }
+        $items = array::push($items, ["id" => $m["id"], "email" => $em, "name" => $nm, "when" => dash_fmt_ts($m["created_at"])]);
+    }
+    $out["recent_members"] = $items;
+    $out["has_members"] = (count($items) > 0);
+    return $out;
+}
+
+// ── 6. hızlı eylemler (yalnız var olan modüller) ─────────────────────────────
+function dash_quick_actions($c) {
+    $slugs = [];
+    foreach (db::query($c, "SELECT slug FROM content_types", []) as $r) { $slugs = array::push($slugs, $r["slug"]); }
+    $qa = [];
+    if (array::contains($slugs, "haber"))   { $qa = array::push($qa, ["label" => "Yeni Haber", "url" => "/admin/type/haber/new", "icon" => "📰"]); }
+    if (array::contains($slugs, "page"))    { $qa = array::push($qa, ["label" => "Yeni Sayfa", "url" => "/admin/type/page/new", "icon" => "📄"]); }
+    if (array::contains($slugs, "product")) { $qa = array::push($qa, ["label" => "Yeni Ürün",  "url" => "/admin/type/product/new", "icon" => "🛍️"]); }
+    $qa = array::push($qa, ["label" => "Medya",          "url" => "/admin/media",    "icon" => "▣"]);
+    $qa = array::push($qa, ["label" => "Formlar",        "url" => "/admin/forms",    "icon" => "✉"]);
+    $qa = array::push($qa, ["label" => "Modül Yönetimi", "url" => "/admin/types",    "icon" => "◲"]);
+    $qa = array::push($qa, ["label" => "Ayarlar",        "url" => "/admin/settings", "icon" => "⚙"]);
+    return $qa;
+}
+
+// ── tümü: şablonun ihtiyaç duyduğu tek assoc ─────────────────────────────────
+function dashboard_data($c) {
+    session::start();
+    $uname = session::get("uname"); if ($uname == null) { $uname = ""; }
+    $d = array::new_assoc();
+    $d["uname"] = $uname;
+    // modül kutucukları
+    $groups = dash_module_groups($c);
+    $d["groups"] = $groups;
+    $d["has_groups"] = (count($groups) > 0);
+    // iletişim
+    $s = dash_submissions($c);
+    foreach (array::keys($s) as $k) { $d[$k] = $s[$k]; }
+    // e-ticaret
+    $e = dash_commerce($c);
+    foreach (array::keys($e) as $k) { $d[$k] = $e[$k]; }
+    // üyeler
+    $m = dash_members($c);
+    foreach (array::keys($m) as $k) { $d[$k] = $m[$k]; }
+    // sistem
+    $d["db_engine"] = dash_db_engine();
+    $d["n_content_total"] = dash_count($c, "SELECT COUNT(*) AS n FROM content", [], 0);
+    $d["n_content_published"] = dash_count($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", [], 0);
+    $d["n_media"] = dash_count($c, "SELECT COUNT(*) AS n FROM media", [], 0);
+    $d["n_scheduled"] = dash_count($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev = 0 AND publish_at IS NOT NULL AND publish_at != ''", [], 0);
+    $d["today"] = date::format(date::timestamp(), "d.m.Y");
+    // hızlı eylemler
+    $d["quick_actions"] = dash_quick_actions($c);
+    return $d;
+}

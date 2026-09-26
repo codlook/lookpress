@@ -1,15 +1,128 @@
 {#extends "views/admin/layout"}
 {#block "content"}
-<div class="section-head"><h2>Panel</h2><span class="muted">Giriş: <b>{$uname}</b></span></div>
-<div class="stat-row">
-  <div class="stat"><div class="stat-n">{$n_content}</div><div class="stat-l">Yayınlı içerik</div></div>
-  {!$ext_stats}
-  <div class="stat"><div class="stat-n">{$n_subs}</div><div class="stat-l">Form gönderimi</div></div>
+<style>
+ /* ---- dashboard (yalnız bu sayfa) ---- */
+ .dash-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+ .dash-head h2{margin:0}
+ .dash-head .sub{color:var(--muted);font-size:13px}
+ .qa-bar{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 22px}
+ .qa-bar a{display:inline-flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);color:var(--fg);
+   padding:8px 13px;border-radius:9px;font-size:13px;font-weight:500;box-shadow:var(--shadow);transition:border-color .12s,color .12s}
+ .qa-bar a:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
+ .qa-bar a .ic{font-size:14px}
+ .sys-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 22px}
+ .sys{background:var(--side);color:#e2e8f0;border-radius:12px;padding:14px 16px;box-shadow:var(--shadow)}
+ .sys .n{font-size:22px;font-weight:700;letter-spacing:-.02em}
+ .sys .l{color:#94a3b8;font-size:12px;margin-top:3px}
+ .sys.warn .n{color:#fbbf24}
+ .grp-title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:18px 0 8px;font-weight:600}
+ .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+ .tile{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);
+   display:flex;flex-direction:column;gap:6px;transition:border-color .12s}
+ .tile:hover{border-color:var(--accent)}
+ .tile .t-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
+ .tile .t-head .ic{font-size:18px}
+ .tile .t-head a{color:var(--fg)}
+ .tile .t-n{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+ .tile .t-l{color:var(--muted);font-size:12px}
+ .tile .t-drafts{font-size:12px;color:var(--warn)}
+ .tile .t-foot{margin-top:auto;padding-top:6px;font-size:12px;display:flex;gap:10px}
+ .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:24px}
+ .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;min-width:0}
+ .panel .p-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:#f8fafc}
+ .panel .p-head h3{margin:0;font-size:14px}
+ .panel .p-head .more{font-size:12px}
+ .panel .p-stats{display:flex;gap:14px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+ .panel .p-stats b{color:var(--fg);font-size:15px}
+ .panel .p-note{padding:6px 16px 0;font-size:12px;color:var(--warn)}
+ .panel ul{list-style:none;margin:0;padding:0}
+ .panel li{padding:10px 16px;border-bottom:1px solid var(--line);font-size:13px;display:flex;gap:10px;align-items:flex-start}
+ .panel li:last-child{border-bottom:none}
+ .panel li .who{flex:1;min-width:0}
+ .panel li .who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .panel li .who span{color:var(--muted);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .panel li .meta{text-align:right;flex-shrink:0;color:var(--muted);font-size:12px}
+ .panel li .meta b{display:block;color:var(--fg);font-size:13px}
+ .panel .empty{padding:18px 16px;color:var(--muted);font-size:13px}
+ .status-chips{display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;border-bottom:1px solid var(--line)}
+ .chip{display:inline-flex;gap:5px;align-items:center;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:2px 9px;color:var(--muted)}
+ .chip b{color:var(--fg)}
+ .badge.open{background:#fef3c7;color:#92400e}
+ .badge.st-cancelled{background:#fee2e2;color:#991b1b}
+ .badge.st-delivered{background:#dcfce7;color:#166534}
+ @media(max-width:480px){ .tiles{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))} .tile .t-n{font-size:22px} }
+</style>
+
+<div class="dash-head">
+  <h2>Panel</h2>
+  <span class="sub">Hoş geldiniz, <b>{$uname}</b> · {$today}</span>
 </div>
-<p class="quicklinks"><a class="btn" href="/admin/types/new">+ Yeni tip</a></p>
 
-{!$ext_panels}
+<div class="qa-bar">
+{#each $quick_actions as $a}  <a href="{$a.url}"><span class="ic">{$a.icon}</span> {$a.label}</a>
+{/each}</div>
 
-<h3>İçerik tipleri</h3>
-<ul class="pages">{!$types_html}</ul>
+<div class="sys-row">
+  <div class="sys"><div class="n">{$n_content_published}</div><div class="l">Yayınlı içerik</div></div>
+  <div class="sys"><div class="n">{$n_content_total}</div><div class="l">Toplam içerik</div></div>
+  <div class="sys{#if $n_scheduled > 0} warn{/if}"><div class="n">{$n_scheduled}</div><div class="l">Zamanlanmış (bekleyen)</div></div>
+  <div class="sys"><div class="n">{$n_media}</div><div class="l">Medya dosyası</div></div>
+  <div class="sys"><div class="n">{$db_engine}</div><div class="l">Veritabanı</div></div>
+</div>
+
+{#if !$has_groups}<p class="muted">Henüz tanımlı modül yok. <a href="/admin/types/new">İlk modülü oluşturun &rarr;</a></p>{/if}
+{#each $groups as $g}
+<div class="grp-title">{$g.label}</div>
+<div class="tiles">
+{#each $g.tiles as $t}  <div class="tile">
+    <div class="t-head"><span class="ic">{$t.icon}</span><a href="{$t.url}">{$t.label}</a></div>
+    <div class="t-n">{$t.published}</div>
+    <div class="t-l">yayında</div>
+    {#if $t.has_drafts}<div class="t-drafts">{$t.drafts} taslak</div>{/if}
+    <div class="t-foot"><a href="{$t.url}">Yönet</a><a href="{$t.new_url}">+ Ekle</a></div>
+  </div>
+{/each}</div>
+{/each}
+
+<div class="panels">
+
+  <div class="panel">
+    <div class="p-head"><h3>Son gönderimler</h3><a class="more" href="/admin/forms">Tümü &rarr;</a></div>
+    <div class="p-stats"><span><b>{$n_subs}</b> toplam</span><span><b>{$n_subs_open}</b> açık</span></div>
+    {#if !$subs_has_status}<div class="p-note">{$subs_status_note}</div>{/if}
+    {#if !$has_subs}<div class="empty">Henüz kayıt yok.</div>{/if}
+    {#if $has_subs}<ul>
+{#each $recent_subs as $s}      <li>
+        <div class="who"><b><a href="{$s.url}">{$s.form_key}</a> {#if $s.is_open}<span class="badge open">açık</span>{/if}</b><span>{$s.preview}</span></div>
+        <div class="meta">{$s.when}</div>
+      </li>
+{/each}    </ul>{/if}
+  </div>
+
+  {#if $has_commerce}<div class="panel">
+    <div class="p-head"><h3>Son siparişler</h3><a class="more" href="/admin/orders">Tümü &rarr;</a></div>
+    <div class="p-stats"><span><b>{$n_orders}</b> sipariş</span><span><b>{$revenue}</b> ciro (iptal hariç)</span></div>
+    <div class="status-chips">{#each $orders_by_status as $st}<span class="chip">{$st.label} <b>{$st.n}</b></span>{/each}</div>
+    {#if !$has_orders}<div class="empty">Henüz kayıt yok.</div>{/if}
+    {#if $has_orders}<ul>
+{#each $recent_orders as $o}      <li>
+        <div class="who"><b><a href="{$o.url}">#{$o.id}</a> · {$o.customer}</b><span>{$o.email}</span></div>
+        <div class="meta"><b>{$o.total}</b><span class="badge st-{$o.status_key}">{$o.status}</span><br>{$o.when}</div>
+      </li>
+{/each}    </ul>{/if}
+  </div>{/if}
+
+  <div class="panel">
+    <div class="p-head"><h3>Son üyeler</h3><a class="more" href="/admin/uyeler">Tümü &rarr;</a></div>
+    <div class="p-stats"><span><b>{$n_members}</b> üye</span></div>
+    {#if !$has_members}<div class="empty">Henüz kayıt yok.</div>{/if}
+    {#if $has_members}<ul>
+{#each $recent_members as $m}      <li>
+        <div class="who"><b>{$m.name}</b><span>{$m.email}</span></div>
+        <div class="meta">{$m.when}</div>
+      </li>
+{/each}    </ul>{/if}
+  </div>
+
+</div>
 {/block}
