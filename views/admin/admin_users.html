@@ -11,9 +11,9 @@
   <label>Kullanıcı adı <input type="text" name="username" required></label>
   <label>Şifre <input type="password" name="password" required></label>
   <label>Rol
-    <select name="role"><option value="editor">editor</option><option value="admin">admin</option></select>
+    <select name="role">{!$role_options}</select>
   </label>
   <button type="submit">Ekle</button>
 </form>
-<p class="muted" style="font-size:13px;margin-top:14px"><b>editor</b>: içerik, medya, formlar ve siparişleri yönetir. <b>admin</b>: ek olarak kullanıcılar, ayarlar ve kuponlar.</p>
+<p class="muted" style="font-size:13px;margin-top:14px">Rolleri ve yetkilerini <a href="/admin/roles">Roller</a> ekranından yönetin.</p>
 {/block}

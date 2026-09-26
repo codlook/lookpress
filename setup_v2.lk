@@ -64,6 +64,13 @@ $migrations = [
         "form_key"   => "string(80)",
         "data_json"  => "text",
         "created_at" => "int default=0"
+    ]],
+    ["id" => "v2_0010_roles", "create_table" => "roles", "columns" => [
+        "id"        => "pk",
+        "name"      => "string(40) unique",
+        "label"     => "string(80)",
+        "perms"     => "text",
+        "is_system" => "int default=0"
     ]]
 ];
 migrate_run($c, $migrations);
@@ -106,6 +113,19 @@ $common = [
 ];
 seed_type($c, "page", "Page", "/{slug}",       $common);
 seed_type($c, "post", "Post", "/blog/{slug}",  $common);
+
+// ── seed built-in roles (RBAC) ────────────────────────────────────────────────
+// admin = superuser (perms implicit, see src/rbac.lk can()); editor = a sensible
+// content-focused default. Both is_system (can't be deleted). Custom roles are
+// created in /admin/roles.
+function seed_role($c, $name, $label, $perms, $sys) {
+    $ex = db::query($c, "SELECT id FROM roles WHERE name = ?", [$name]);
+    if (count($ex) == 0) {
+        db::exec($c, "INSERT INTO roles (name, label, perms, is_system) VALUES (?, ?, ?, ?)", [$name, $label, json::encode($perms), $sys]);
+    }
+}
+seed_role($c, "admin",  "Yönetici", [], 1);
+seed_role($c, "editor", "Editör",   ["content", "media", "forms"], 1);
 
 // ── seed the first admin user (once) from ADMIN_PASSWORD ──────────────────────
 // The env var is the SEED password for the initial `admin` account; change it

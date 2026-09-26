@@ -26,3 +26,18 @@ function cfg_media_mimes() { return ["image/png", "image/jpeg", "image/gif", "im
 // product name in ONE place here.
 function cfg_default_title() { return "LookPress"; }
 function cfg_default_currency() { return "&#8378;"; }
+
+// Permission catalog (core capabilities). A role grants a subset of these; the
+// 'admin' role is a superuser (all permissions implicitly). Extensions add their own
+// via xp_permissions() (commerce → orders, coupons). See src/rbac.lk.
+function cfg_permissions() {
+    return [
+        ["key" => "content",  "label" => "İçerik ekle/düzenle"],
+        ["key" => "types",    "label" => "İçerik tiplerini yönet"],
+        ["key" => "media",    "label" => "Medya kütüphanesi"],
+        ["key" => "forms",    "label" => "Form gönderimleri"],
+        ["key" => "users",    "label" => "Kullanıcı yönetimi"],
+        ["key" => "roles",    "label" => "Rol & yetki yönetimi"],
+        ["key" => "settings", "label" => "Ayarlar"]
+    ];
+}

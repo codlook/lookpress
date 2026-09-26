@@ -1,0 +1,19 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Roller &amp; Yetkiler <span class="muted">({$count})</span></h2></div>
+<p class="muted" style="font-size:13px;margin:0 0 12px">Her rol bir yetki kümesidir. <b>Yönetici</b> tüm yetkilere sahiptir (süper kullanıcı). Kullanıcılara <a href="/admin/users">Kullanıcılar</a> ekranından rol atarsınız.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Rol</th><th>Yetkiler</th><th></th></tr></thead>
+<tbody>{!$rows}</tbody>
+</table></div>
+
+<h3>Yeni rol</h3>
+<form method="post" action="/admin/roles/new" class="role-form">
+  <div class="rf-row">
+    <label>Ad (slug) <input name="name" placeholder="ör. yazar" required></label>
+    <label>Etiket <input name="label" placeholder="ör. Yazar"></label>
+  </div>
+  <div class="pgrid">{!$new_perms}</div>
+  <button type="submit">Rol oluştur</button>
+</form>
+{/block}

@@ -61,6 +61,11 @@ function admin_chrome($data) {
     $un = session::get("uname"); if ($un == null) { $un = ""; }
     $data["nav_user"] = $un;
     $data["nav_super"] = is_super();
+    // per-permission nav flags (so the sidebar shows only what the role may use)
+    $data["can_users"] = can("users");
+    $data["can_roles"] = can("roles");
+    $data["can_settings"] = can("settings");
+    $data["nav_manage"] = (can("users") || can("roles") || can("settings"));
     $data["ext_nav"] = xp_admin_nav(["super" => is_super()]);
     // Dynamic "İçerik Yönetimi" nav: one entry per content type (haberler, blog,
     // duyurular … appear automatically as they're created), minus types an

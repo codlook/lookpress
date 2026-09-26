@@ -18,6 +18,9 @@ function xp_admin_nav($ctx) { return ""; }
 // Content types an extension manages in its OWN nav group, so the core's
 // "İçerik Yönetimi" list skips them (commerce → ["product"]). Default: hide none.
 function xp_hidden_types() { return []; }
+// Permission keys an extension contributes to the RBAC catalog (commerce →
+// orders, coupons). Each item: ["key"=>..., "label"=>...]. Default: none.
+function xp_permissions() { return []; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }

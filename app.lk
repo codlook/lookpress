@@ -45,6 +45,7 @@ use "config/config.lk";
 // ── core seams + domain modules (functions only; no routes) ──────────────────
 use "src/hooks.lk";    // action/filter registry (the extension seam)
 use "src/core.lk";
+use "src/rbac.lk";     // role-based access control (can())
 use "src/types.lk";
 use "src/render.lk";
 

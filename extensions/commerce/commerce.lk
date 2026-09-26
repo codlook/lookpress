@@ -129,6 +129,7 @@ route("POST", "/checkout", function() {
 // ── admin routes: orders + coupons ────────────────────────────────────────────
 route("GET", "/admin/orders", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("orders")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
     $rows_html = "";
@@ -142,6 +143,7 @@ route("GET", "/admin/orders", function() {
 });
 route("GET", "/admin/order/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("orders")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $id = request::param("id");
     $orows = db::query($c, "SELECT id, email, cust_name, address, phone, total, status FROM orders WHERE id = ?", [$id]);
@@ -166,6 +168,7 @@ route("GET", "/admin/order/{id}", function() {
 });
 route("POST", "/admin/order/{id}/status", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("orders")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $id = request::param("id");
     $status = request::post("status");
@@ -176,7 +179,7 @@ route("POST", "/admin/order/{id}/status", function() {
 });
 route("GET", "/admin/coupons", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!is_super()) { return response::status(403, "admin only"); }
+    if (!can("coupons")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $rows = db::query($c, "SELECT code, kind, value, active FROM coupons ORDER BY id DESC", []);
     $html = "";
@@ -189,7 +192,7 @@ route("GET", "/admin/coupons", function() {
 });
 route("POST", "/admin/coupons/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!is_super()) { return response::status(403, "admin only"); }
+    if (!can("coupons")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $code = string::trim(request::post("code"));
     $kind = request::post("kind"); if ($kind != "fixed") { $kind = "percent"; }
@@ -254,6 +257,10 @@ function xp_home_sections($ctx) {
 // commerce manages the "product" content type in its OWN group, so the core's
 // "İçerik Yönetimi" list skips it.
 function xp_hidden_types() { return ["product"]; }
+// commerce contributes its permissions to the RBAC catalog.
+function xp_permissions() {
+    return [["key" => "orders", "label" => "Siparişler"], ["key" => "coupons", "label" => "Kuponlar"]];
+}
 // Admin sidebar: the "Ticaret" nav group (coupons gated to super users).
 function xp_admin_nav($ctx) {
     $out = "<div class=\"grp\">Ticaret</div>"

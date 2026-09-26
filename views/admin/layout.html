@@ -157,6 +157,14 @@
  .mp-item img{display:block;width:100%;height:96px;object-fit:cover;background:#eef1f8}
  .mp-item span{display:block;padding:6px 8px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .mp-empty{color:var(--muted);padding:24px;text-align:center}
+
+ /* ---- roles: permission checkboxes ---- */
+ .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px 14px;margin:4px 0 10px}
+ .pcb{display:flex;align-items:center;gap:7px;margin:0;font-weight:400;font-size:13px}
+ .pcb input{width:auto;margin:0}
+ .role-form{max-width:640px}
+ .role-form .rf-row{display:flex;gap:12px;flex-wrap:wrap}
+ .role-form .rf-row label{flex:1;min-width:160px}
 </style></head>
 <body>
 <div class="layout">
@@ -170,10 +178,11 @@
    <a href="/admin/media" data-nav="/admin/media"><span class="ic">▣</span> Medya</a>
    <a href="/admin/forms" data-nav="/admin/forms"><span class="ic">✉</span> Form gönderimleri</a>
 {!$ext_nav}
-{#if $nav_super}   <div class="grp">Yönetim</div>
-   <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
-   <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
-{/if}  </nav>
+{#if $nav_manage}   <div class="grp">Yönetim</div>
+{#if $can_users}   <a href="/admin/users" data-nav="/admin/users"><span class="ic">◍</span> Kullanıcılar</a>
+{/if}{#if $can_roles}   <a href="/admin/roles" data-nav="/admin/roles"><span class="ic">◈</span> Roller &amp; Yetkiler</a>
+{/if}{#if $can_settings}   <a href="/admin/settings" data-nav="/admin/settings"><span class="ic">⚙</span> Ayarlar</a>
+{/if}{/if}  </nav>
   <div class="sfoot">
    <div class="who">Giriş: <b>{$nav_user}</b></div>
    <a class="out" href="/" target="_blank">↗ Siteyi gör</a>
