@@ -79,7 +79,10 @@ function block_val($d, $k) {
     if ($v == null) { return ""; }
     return $v;
 }
-function render_one_block($t, $d) {
+function render_one_block($t, $d) { return render_block_at($t, $d, 0); }
+// $depth: iç içe geçme seviyesi (columns → nested blocks). 3'ten derine inilmez.
+function render_block_at($t, $d, $depth) {
+    if ($d == null || !type::is_array($d)) { $d = array::new_assoc(); }
     if ($t == "heading") {
         $tag = "h2"; if (block_val($d, "level") == "3") { $tag = "h3"; }
         return "<" . $tag . ">" . html::escape(block_val($d, "text")) . "</" . $tag . ">";
@@ -115,7 +118,287 @@ function render_one_block($t, $d) {
         return $l . "</ul>";
     }
     if ($t == "divider") { return "<hr class=\"blk-hr\">"; }
+    // ── bileşenler (Wave 2) — her biri eksik/bozuk veride "" döner, throw etmez ──
+    if ($t == "hero")    { return render_blk_hero($d); }
+    if ($t == "slider")  { return render_blk_slider($d); }
+    if ($t == "columns") { return render_blk_columns($d, $depth); }
+    if ($t == "listing") { return render_blk_listing($d); }
+    if ($t == "form")    { return render_blk_form($d); }
+    if ($t == "map")     { return render_blk_map($d); }
+    if ($t == "video")   { return render_blk_video($d); }
+    if ($t == "html")    { return render_blk_html($d); }
     return "";
+}
+
+// ── bileşen yardımcıları ──────────────────────────────────────────────────────
+// İstek dili: yol /en veya /en/... ise "en", aksi hâlde "tr" (render_blocks'a
+// dil parametresi gelmez; listing bağlantıları için gerekli).
+function block_lang() {
+    $p = request::path(); if ($p == null) { $p = ""; }
+    if ($p == "/en" || string::starts_with($p, "/en/")) { return "en"; }
+    return "tr";
+}
+// "6" → 6; boş/geçersiz → $def; 1..50 aralığına kırpılır.
+function block_limit($v, $def) {
+    if ($v == null || $v == "") { return $def; }
+    $n = type::to_int($v);
+    if ($n < 1) { $n = $def; }
+    if ($n > 50) { $n = 50; }
+    return $n;
+}
+// Yalnız [A-Za-z0-9_-] karakterlerinden oluşuyor mu? (video id'leri için)
+function block_safe_id($s) {
+    if ($s == null || $s == "") { return false; }
+    $ok = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
+    $n = string::len($s); $i = 0;
+    while ($i < $n) {
+        if (string::index_of($ok, string::substr($s, $i, 1)) < 0) { return false; }
+        $i = $i + 1;
+    }
+    return true;
+}
+// $s içinde $needle'dan sonrasını al; $stops karakterlerinden ilkinde kes.
+function block_after($s, $needle, $stops) {
+    $i = string::index_of($s, $needle);
+    if ($i < 0) { return ""; }
+    $r = string::substr($s, $i + string::len($needle));
+    $cut = string::len($r); $j = 0;
+    while ($j < $cut) {
+        if (string::index_of($stops, string::substr($r, $j, 1)) >= 0) { $cut = $j; }
+        $j = $j + 1;
+    }
+    return string::substr($r, 0, $cut);
+}
+// body_html → düz metin özet (~140 karakter; sade kesme).
+function block_excerpt($html_in, $n) {
+    if ($html_in == null || $html_in == "") { return ""; }
+    $txt = string::trim(html::strip($html_in));
+    if (string::len($txt) <= $n) { return $txt; }
+    return string::substr($txt, 0, $n) . "…";
+}
+// Bir slayt satırı → markup. Başlık/alt başlık/bağlantı isteğe bağlı.
+function block_slide_html($image, $title, $subtitle, $link, $idx) {
+    $cls = "slide"; if ($idx == 0) { $cls = "slide is-active"; }
+    $hidden = "true"; if ($idx == 0) { $hidden = "false"; }
+    $h = "<div class=\"" . $cls . "\" role=\"group\" aria-roledescription=\"slide\" aria-hidden=\"" . $hidden . "\">";
+    if ($link != "") { $h = $h . "<a class=\"slide-link\" href=\"" . html::escape($link) . "\">"; }
+    if ($image != "") { $h = $h . "<img src=\"" . html::escape($image) . "\" alt=\"" . html::escape($title) . "\" loading=\"lazy\">"; }
+    if ($title != "" || $subtitle != "") {
+        $h = $h . "<div class=\"slide-cap\">";
+        if ($title != "") { $h = $h . "<h3>" . html::escape($title) . "</h3>"; }
+        if ($subtitle != "") { $h = $h . "<p>" . html::escape($subtitle) . "</p>"; }
+        $h = $h . "</div>";
+    }
+    if ($link != "") { $h = $h . "</a>"; }
+    return $h . "</div>";
+}
+
+// hero: arka plan görseli + üstüne başlık/alt başlık + isteğe bağlı buton.
+function render_blk_hero($d) {
+    $title = block_val($d, "title"); $sub = block_val($d, "subtitle");
+    $img = block_val($d, "image"); $bl = block_val($d, "button_label"); $bu = block_val($d, "button_url");
+    $align = "center"; if (block_val($d, "align") == "left") { $align = "left"; }
+    if ($title == "" && $sub == "" && $img == "") { return ""; }
+    $style = "";
+    if ($img != "") { $style = " style=\"background-image:url('" . html::escape($img) . "')\""; }
+    $h = "<section class=\"blk-hero align-" . $align . "\"" . $style . "><div class=\"hero-inner\">";
+    if ($title != "") { $h = $h . "<h2>" . html::escape($title) . "</h2>"; }
+    if ($sub != "") { $h = $h . "<p>" . html::escape($sub) . "</p>"; }
+    if ($bl != "" && $bu != "") { $h = $h . "<a class=\"btn\" href=\"" . html::escape($bu) . "\">" . html::escape($bl) . "</a>"; }
+    return $h . "</div></section>";
+}
+
+// slider: source=module → modülün yayınlanmış öğeleri (fields_json.order, sonra id);
+// source=manual → data.slides. Prev/next + otomatik ilerleme için küçük satır-içi JS.
+function slider_module_slides($slug, $limit) {
+    $out = [];
+    if ($slug == "") { return $out; }
+    $c = conn();
+    $rows = db::query($c, "SELECT c.id, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.published_rev > 0 ORDER BY c.id ASC", [$slug]);
+    $items = [];
+    foreach ($rows as $r) {
+        $v = json::decode($r["fields_json"]); if ($v == null || !type::is_array($v)) { $v = array::new_assoc(); }
+        $ord = block_val($v, "order"); if ($ord == "") { $ord = 0; } else { $ord = type::to_int($ord); }
+        $t = block_val($v, "title"); if ($t == "") { $t = $r["title"]; if ($t == null) { $t = ""; } }
+        $items = array::push($items, ["ord" => $ord, "id" => type::to_int($r["id"]), "image" => block_val($v, "image"),
+                                      "title" => $t, "subtitle" => block_val($v, "subtitle"), "link" => block_val($v, "link")]);
+    }
+    // küçük liste: seçmeli sıralama (order, sonra id) — core.lk'daki kalıpla aynı
+    $remaining = $items;
+    while (count($remaining) > 0 && count($out) < $limit) {
+        $best = null; $bi = -1; $i = 0;
+        foreach ($remaining as $m) {
+            $take = false;
+            if ($best == null) { $take = true; }
+            else { if ($m["ord"] < $best["ord"] || ($m["ord"] == $best["ord"] && $m["id"] < $best["id"])) { $take = true; } }
+            if ($take) { $best = $m; $bi = $i; }
+            $i = $i + 1;
+        }
+        $out = array::push($out, $best);
+        $rest = []; $i = 0;
+        foreach ($remaining as $m) { if ($i != $bi) { $rest = array::push($rest, $m); } $i = $i + 1; }
+        $remaining = $rest;
+    }
+    return $out;
+}
+function render_blk_slider($d) {
+    $src = block_val($d, "source"); if ($src == "") { $src = "module"; }
+    $limit = block_limit(block_val($d, "limit"), 5);
+    $slides = [];
+    if ($src == "manual") {
+        $raw = $d["slides"]; if ($raw == null || !type::is_array($raw)) { $raw = []; }
+        foreach ($raw as $s) {
+            if ($s == null || !type::is_array($s)) { continue; }
+            if (count($slides) >= $limit) { break; }
+            $slides = array::push($slides, ["image" => block_val($s, "image"), "title" => block_val($s, "title"),
+                                            "subtitle" => block_val($s, "subtitle"), "link" => block_val($s, "link")]);
+        }
+    } else {
+        $mod = block_val($d, "module"); if ($mod == "") { $mod = "slider"; }
+        $slides = slider_module_slides($mod, $limit);
+    }
+    if (count($slides) == 0) { return ""; }
+    $h = "<div class=\"blk-slider\" tabindex=\"0\" aria-roledescription=\"carousel\"><div class=\"slides\">";
+    $dots = ""; $i = 0;
+    foreach ($slides as $s) {
+        $h = $h . block_slide_html($s["image"], $s["title"], $s["subtitle"], $s["link"], $i);
+        $dc = "sl-dot"; if ($i == 0) { $dc = "sl-dot is-active"; }
+        $dots = $dots . "<button type=\"button\" class=\"" . $dc . "\" aria-label=\"Slayt " . ($i + 1) . "\"></button>";
+        $i = $i + 1;
+    }
+    $h = $h . "</div>";
+    if (count($slides) > 1) {
+        $h = $h . "<button type=\"button\" class=\"sl-prev\" aria-label=\"Önceki\">&#8249;</button><button type=\"button\" class=\"sl-next\" aria-label=\"Sonraki\">&#8250;</button><div class=\"sl-dots\">" . $dots . "</div>";
+    }
+    $h = $h . "</div>";
+    // Satır-içi, kütüphanesiz. Her .blk-slider bir kez init edilir (data-ok).
+    // NOT: LOOK string'i içinde "{isim=" kalıbı kullanılmaz (interpolasyon).
+    $js = "<script>(function(){document.querySelectorAll('.blk-slider').forEach(function(s){if(s.dataset.ok)return;s.dataset.ok='1';var sl=s.querySelectorAll('.slide'),ds=s.querySelectorAll('.sl-dot'),n=sl.length,i=0,t=null;if(n<2)return;"
+        . "function go(k){var m=(k+n)%n;i=m;sl.forEach(function(e,j){e.classList.toggle('is-active',j===i);e.setAttribute('aria-hidden',j===i?'false':'true');});ds.forEach(function(e,j){e.classList.toggle('is-active',j===i);});}"
+        . "function auto(){clearInterval(t);if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;var h=setInterval(function(){go(i+1);},5000);t=h;}"
+        . "var p=s.querySelector('.sl-prev'),q=s.querySelector('.sl-next');if(p)p.addEventListener('click',function(){go(i-1);auto();});if(q)q.addEventListener('click',function(){go(i+1);auto();});"
+        . "ds.forEach(function(e,j){e.addEventListener('click',function(){go(j);auto();});});"
+        . "s.addEventListener('keydown',function(e){if(e.key==='ArrowLeft'){go(i-1);auto();}if(e.key==='ArrowRight'){go(i+1);auto();}});"
+        . "s.addEventListener('mouseenter',function(){clearInterval(t);});s.addEventListener('mouseleave',auto);auto();});})();</script>";
+    return $h . $js;
+}
+
+// columns: her sütun kendi blok listesini taşır ({"blocks":[…]} veya JSON string).
+// Derinlik sınırı 3: depth >= 3'te sütun bloğu boş döner (sonsuz iç içe geçme yok).
+function render_blk_columns($d, $depth) {
+    if ($depth >= 3) { return ""; }
+    $cnt = "2"; if (block_val($d, "count") == "3") { $cnt = "3"; }
+    $cols = $d["cols"]; if ($cols == null || !type::is_array($cols)) { return ""; }
+    $h = "<div class=\"blk-columns cols-" . $cnt . "\">";
+    $n = 0;
+    foreach ($cols as $col) {
+        if ($n >= type::to_int($cnt)) { break; }
+        $inner = "";
+        if ($col != null && type::is_array($col)) {
+            $bl = $col["blocks"];
+            if ($bl != null && !type::is_array($bl)) { $bl = json::decode($bl); }
+            if ($bl != null && type::is_array($bl)) { $inner = render_blocks_at($bl, $depth + 1); }
+        }
+        $h = $h . "<div class=\"col\">" . $inner . "</div>";
+        $n = $n + 1;
+    }
+    return $h . "</div>";
+}
+
+// listing: bir modülün son yayınlanmış öğeleri (yalnız config.public modüller).
+// URL kalıbı render_listing ile aynı: lang_prefix + url_pattern'ın "/{slug}"siz hâli + "/" + slug.
+function render_blk_listing($d) {
+    $slug = block_val($d, "module"); if ($slug == "") { return ""; }
+    $limit = block_limit(block_val($d, "limit"), 6);
+    $layout = "cards"; if (block_val($d, "layout") == "list") { $layout = "list"; }
+    $show_img = (block_val($d, "show_image") != "0");
+    $show_exc = (block_val($d, "show_excerpt") != "0");
+    $c = conn();
+    $t = load_type($c, $slug);
+    if ($t == null || !$t["config"]["public"]) { return ""; }
+    $lang = block_lang();
+    $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
+    $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json, r.body_html FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT ?", [$slug, $lang, $limit]);
+    if (count($rows) == 0) { return ""; }
+    $items = card_items($base, $rows);   // url/title/image kalıbı tek yerde
+    $h = "<div class=\"blk-listing layout-" . $layout . "\">";
+    if ($layout == "cards") { $h = $h . "<div class=\"cards\">"; } else { $h = $h . "<ul class=\"listing-list\">"; }
+    $i = 0;
+    foreach ($items as $it) {
+        $exc = ""; if ($show_exc) { $exc = block_excerpt($rows[$i]["body_html"], 140); }
+        $imgh = "";
+        if ($show_img && $it["has_image"]) { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($it["image"]) . "\" alt=\"\" loading=\"lazy\"></span>"; }
+        $exch = ""; if ($exc != "") { $exch = "<div class=\"card-excerpt\">" . html::escape($exc) . "</div>"; }
+        if ($layout == "cards") {
+            $h = $h . "<a class=\"card\" href=\"" . html::escape($it["url"]) . "\">" . $imgh . "<div class=\"card-body\"><div class=\"card-title\">" . html::escape($it["title"]) . "</div>" . $exch . "</div></a>";
+        } else {
+            $h = $h . "<li><a href=\"" . html::escape($it["url"]) . "\">" . $imgh . "<span class=\"li-body\"><span class=\"card-title\">" . html::escape($it["title"]) . "</span>" . $exch . "</span></a></li>";
+        }
+        $i = $i + 1;
+    }
+    if ($layout == "cards") { $h = $h . "</div>"; } else { $h = $h . "</ul>"; }
+    return $h . "</div>";
+}
+
+// form: tanımlı bir formu (forms tablosu) sayfa içine gömer. form.html ile aynı
+// markup; /forms/{key}'e POST; CSRF alanı csrf_field() ile doğrudan üretilir.
+function render_blk_form($d) {
+    $key = block_val($d, "form"); if ($key == "") { return ""; }
+    $c = conn();
+    $def = form_get($c, $key);
+    if ($def == null) { return ""; }
+    $title = block_val($d, "title"); if ($title == "") { $title = $def["title"]; if ($title == null) { $title = ""; } }
+    $h = "<div class=\"blk-form\">";
+    if ($title != "") { $h = $h . "<h2>" . html::escape($title) . "</h2>"; }
+    $h = $h . "<form method=\"post\" action=\"/forms/" . html::escape($def["fkey"]) . "\" class=\"contact-form\">" . csrf_field();
+    $h = $h . "<input type=\"text\" name=\"website\" class=\"hp\" tabindex=\"-1\" autocomplete=\"off\">";
+    foreach (form_field_views($def["fields"]) as $f) {
+        $req = ""; $star = "";
+        if ($f["required"]) { $req = " required"; $star = " *"; }
+        $h = $h . "<label>" . html::escape($f["label"]) . $star;
+        if ($f["is_textarea"]) {
+            $h = $h . "<textarea name=\"" . html::escape($f["name"]) . "\" rows=\"4\"" . $req . "></textarea>";
+        } else {
+            $h = $h . "<input type=\"" . html::escape($f["input_type"]) . "\" name=\"" . html::escape($f["name"]) . "\"" . $req . ">";
+        }
+        $h = $h . "</label>";
+    }
+    return $h . "<button type=\"submit\">Gönder</button></form></div>";
+}
+
+// map: yalnız Google Maps embed URL'leri; başka her şey "" (iframe kaynağı beyaz liste).
+function render_blk_map($d) {
+    $u = block_val($d, "embed_url");
+    if (!(string::starts_with($u, "https://www.google.com/maps/embed") || string::starts_with($u, "https://maps.google.com/"))) { return ""; }
+    return "<div class=\"blk-map\"><iframe src=\"" . html::escape($u) . "\" loading=\"lazy\" allowfullscreen referrerpolicy=\"no-referrer-when-downgrade\" title=\"Harita\"></iframe></div>";
+}
+
+// video: YouTube (watch?v= / youtu.be/) → youtube-nocookie embed; Vimeo → player.vimeo;
+// tanınmayan URL → düz bağlantı. Kimlikler [A-Za-z0-9_-] süzgecinden geçer.
+function render_blk_video($d) {
+    $u = block_val($d, "url"); if ($u == "") { return ""; }
+    $src = "";
+    if (string::index_of($u, "youtube.com/watch") >= 0) {
+        $id = block_after($u, "v=", "&#?");
+        if (block_safe_id($id)) { $src = "https://www.youtube-nocookie.com/embed/" . $id; }
+    } else { if (string::index_of($u, "youtu.be/") >= 0) {
+        $id = block_after($u, "youtu.be/", "?&#/");
+        if (block_safe_id($id)) { $src = "https://www.youtube-nocookie.com/embed/" . $id; }
+    } else { if (string::index_of($u, "vimeo.com/") >= 0) {
+        $id = block_after($u, "vimeo.com/", "?&#/");
+        if (block_safe_id($id)) { $src = "https://player.vimeo.com/video/" . $id . "?dnt=1"; }
+    } } }
+    if ($src == "") {
+        return "<p class=\"blk-video blk-video-link\"><a href=\"" . html::escape($u) . "\" rel=\"noopener\" target=\"_blank\">" . html::escape($u) . "</a></p>";
+    }
+    return "<div class=\"blk-video\"><iframe src=\"" . html::escape($src) . "\" loading=\"lazy\" allow=\"accelerometer; encrypted-media; picture-in-picture\" allowfullscreen title=\"Video\"></iframe></div>";
+}
+
+// html: ham HTML — yalnız admin yazar (blok içerikleri tümüyle admin-yazımlı),
+// bu yüzden kaçırılmadan basılır; yorum işaretiyle sarılır (contract'ta belgeli).
+function render_blk_html($d) {
+    $code = block_val($d, "code"); if ($code == "") { return ""; }
+    return "<!-- blk-html: trusted admin-authored markup --><div class=\"blk-html\">" . $code . "</div><!-- /blk-html -->";
 }
 // ── gallery / repeater field renderers (public) ───────────────────────────────
 // gallery value: JSON array of URLs (or an already-decoded list). Reuses the
@@ -177,13 +460,19 @@ function render_repeater_field($f, $v) {
 function render_blocks($json) {
     if ($json == null) { return ""; }
     if ($json == "") { return ""; }
-    $blocks = json::decode($json);
-    if ($blocks == null) { return ""; }
+    $blocks = $json;
+    if (!type::is_array($blocks)) { $blocks = json::decode($json); }
+    if ($blocks == null || !type::is_array($blocks)) { return ""; }
+    return render_blocks_at($blocks, 0);
+}
+// Çözülmüş blok listesi → HTML; $depth columns iç içe geçmesini sınırlar.
+function render_blocks_at($blocks, $depth) {
     $html = "";
     foreach ($blocks as $b) {
+        if ($b == null || !type::is_array($b)) { continue; }
         $t = $b["type"]; if ($t == null) { $t = ""; }
-        $d = $b["data"]; if ($d == null) { $d = array::new_assoc(); }
-        $html = $html . render_one_block($t, $d);
+        $d = $b["data"]; if ($d == null || !type::is_array($d)) { $d = array::new_assoc(); }
+        $html = $html . render_block_at($t, $d, $depth);
     }
     return $html;
 }
