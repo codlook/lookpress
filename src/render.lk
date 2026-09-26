@@ -28,6 +28,14 @@ function content_fields($c, $type, $fields_json) {
         if ($v == "") { continue; }
         $kind = "row";
         if ($name == "image") { $kind = "image"; } else { if ($name == "price") { $kind = "price"; } }
+        // yeni giriş-varyantı alanları anlamlı bir kind taşısın: url → bağlantı,
+        // email → mailto bağlantı, tel → tel bağlantı; diğerleri düz metin (row).
+        $ft = ""; try { $ft = $f["type"]; } catch ($e) { $ft = ""; }
+        if ($kind == "row") {
+            if ($ft == "url") { $kind = "url"; }
+            else { if ($ft == "email") { $kind = "email"; }
+            else { if ($ft == "tel") { $kind = "tel"; } } }
+        }
         $out = array::push($out, ["name" => $name, "value" => $v, "kind" => $kind]);
     }
     return $out;

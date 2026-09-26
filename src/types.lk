@@ -62,6 +62,25 @@ function field_input($c, $f, $value) {
     if ($t == "date") {
         return "<label>" . $name . "<input type=\"date\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
     }
+    if ($t == "url") {
+        return "<label>" . $name . "<input type=\"url\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "email") {
+        return "<label>" . $name . "<input type=\"email\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "number") {
+        // opsiyonel min/max alan tanımında taşınıyorsa <input>'a yansıt
+        $mm = "";
+        try { if ($f["min"] != null && $f["min"] != "") { $mm = $mm . " min=\"" . html::escape($f["min"]) . "\""; } } catch ($e) { $mm = $mm; }
+        try { if ($f["max"] != null && $f["max"] != "") { $mm = $mm . " max=\"" . html::escape($f["max"]) . "\""; } } catch ($e) { $mm = $mm; }
+        return "<label>" . $name . "<input type=\"number\" name=\"" . $name . "\" value=\"" . $v . "\"" . $mm . "></label>";
+    }
+    if ($t == "color") {
+        return "<label>" . $name . "<input type=\"color\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
+    if ($t == "tel") {
+        return "<label>" . $name . "<input type=\"tel\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
+    }
     if ($t == "image" || $name == "image") {
         // Media field: a URL input + live preview + a "pick from library / upload" button
         // wired to the admin media picker (see the modal + JS in views/admin/layout.html).
@@ -127,6 +146,24 @@ function validate_post($c, $fields) {
             if ($req && $raw == "") { $errors = array::push($errors, $name . " is required"); }
             if ($t == "int" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+$")) { $errors = array::push($errors, $name . " must be an integer"); }
             if ($t == "decimal" && $raw != "" && !string::regex_match($raw, "^-?[0-9]+(\\.[0-9]+)?$")) { $errors = array::push($errors, $name . " must be a number"); }
+            if ($t == "url" && $raw != "" && !string::regex_match($raw, "^https?://[^ ]+$")) { $errors = array::push($errors, $name . " must be a valid URL (http:// or https://)"); }
+            if ($t == "email" && $raw != "" && !string::regex_match($raw, "^[^@ ]+@[^@ ]+\\.[^@ ]+$")) { $errors = array::push($errors, $name . " must be a valid email address"); }
+            if ($t == "color" && $raw != "" && !string::regex_match($raw, "^#[0-9a-fA-F]{6}$")) { $errors = array::push($errors, $name . " must be a hex color (#rrggbb)"); }
+            if ($t == "tel" && $raw != "" && !string::regex_match($raw, "^[0-9 +()\\-]+$")) { $errors = array::push($errors, $name . " must be a valid phone number"); }
+            if ($t == "number" && $raw != "") {
+                if (!string::regex_match($raw, "^-?[0-9]+(\\.[0-9]+)?$")) {
+                    $errors = array::push($errors, $name . " must be a number");
+                } else {
+                    // opsiyonel min/max alan tanımında taşınıyorsa sınırları uygula
+                    $nv = type::to_float($raw);
+                    $has_min = false; $minv = 0.0;
+                    try { if ($f["min"] != null && $f["min"] != "") { $has_min = true; $minv = type::to_float($f["min"]); } } catch ($e) { $has_min = false; }
+                    if ($has_min && $nv < $minv) { $errors = array::push($errors, $name . " must be >= " . $f["min"]); }
+                    $has_max = false; $maxv = 0.0;
+                    try { if ($f["max"] != null && $f["max"] != "") { $has_max = true; $maxv = type::to_float($f["max"]); } } catch ($e) { $has_max = false; }
+                    if ($has_max && $nv > $maxv) { $errors = array::push($errors, $name . " must be <= " . $f["max"]); }
+                }
+            }
             if ($t == "select" && $raw != "") {
                 $ok = false; foreach ($f["choices"] as $ch) { if ($ch == $raw) { $ok = true; } }
                 if (!$ok) { $errors = array::push($errors, $name . " is not an allowed choice"); }
@@ -160,8 +197,12 @@ function with_seo($values) {
     return $values;
 }
 function save_content($c, $type, $id, $slug, $values, $status, $lang) {
-    $title = $values["title"];
-    $body_md = $values["body"];
+    // title/body are the two "well-known" revision columns, but a content type need
+    // NOT declare them (e.g. a business-card / event / spec type with only custom
+    // fields). Missing → "" so the NOT NULL revision columns still get a value and a
+    // body-less type saves cleanly (its data lives in fields_json regardless).
+    $title = ""; try { if ($values["title"] != null) { $title = $values["title"]; } } catch ($e) { $title = ""; }
+    $body_md = ""; try { if ($values["body"] != null) { $body_md = $values["body"]; } } catch ($e) { $body_md = ""; }
     $body_html = markdown_to_html($body_md);
     $fields_json = json::encode($values);
     $ts = date::timestamp();
