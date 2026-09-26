@@ -137,11 +137,14 @@ VM off, and the route budget stays at ≤ 69.
 - Follow-up (small): `response::status(404, body)` ignores the body in the core, so
   404 pages are blank — render the not-found view with `response::html` + a status call.
 
-### Wave 3 — polish & proof
-- ⬜ Populated demo site per vertical (kurumsal / haber / e-ticaret) + first-run onboarding.
-- 🟡 Email wired to flows (order/contact/reset) via core `mail::`.
-- ⬜ Backups (DB + uploads) one-command; deploy to test.codlook.com.
-- ⬜ WXR importer, FTS5 search, product-layer benchmarks, security audit pass.
+### Wave 3 — polish & proof ✅ (shipped 2026-09-26, 70 routes, VM off)
+- ✅ Populated corporate demo (block-composed homepage + hakkımızda, slider, haber/duyuru/proje/etkinlik/galeri/video/ekip, Sabit Alanlar defaults, corporate menu) + first-run onboarding checklist on the dashboard; `page` module is block-composable.
+- ✅ Email flows via core `mail::` (never-throwing wrapper): form-submission notification, order confirmation (+ copy to contact_email), member password reset (single-use 60-min tokens, no enumeration; dev-mode link log when no mailer). Configure `MAIL_PROVIDER` + provider env to enable.
+- ✅ Member deactivation (`POST /admin/uyeler`) · real 404 pages.
+- ✅ Backups (Wave 2).
+- ⬜ **Deploy to test.codlook.com** (with `LOOK_BYTECODE=0` in the service env).
+- ⬜ WXR importer, FTS5 search, product-layer benchmarks, security audit pass (next).
+- ⬜ Per-vertical demo presets (haber-sitesi / e-ticaret) as one-click seeds.
 
 ### Already shipped (for the record)
 Type engine + auto CRUD/API/admin · versioned content + rollback · scheduled
