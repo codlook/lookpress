@@ -5,5 +5,8 @@
   <input type="search" name="q" value="{$q}" placeholder="Ürün, yazı, sayfa ara…">
   <button>Ara</button>
 </form>
-<ul class="pages">{!$results}</ul>
+<ul class="pages">
+{#each $items as $it}<li><a href="{$it.url}">{$it.title}</a> <span class="muted">({$it.type})</span></li>{/each}
+</ul>
+{#if $searched}{#if $count == 0}<p class="muted">"{$q}" için sonuç yok.</p>{/if}{/if}
 {/block}

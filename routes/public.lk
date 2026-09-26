@@ -6,6 +6,7 @@ use json;
 use html;
 use date;
 use file;
+use array;
 
 // ── home + blog index (lang-aware; tr = no prefix, en = /en) ──────────────────
 route("GET", "/",        function() { return home_render("tr"); });
@@ -34,18 +35,16 @@ route("GET", "/search", function() {
     $c = conn();
     $q = request::get("q") ?? "";
     $q = string::trim($q);
-    $results = ""; $count = 0;
+    $items = []; $count = 0;
     if ($q != "") {
         $like = "%" . $q . "%";
         $rows = db::query($c, "SELECT c.type, c.slug, r.title, ct.url_pattern FROM content c JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0 AND (r.title LIKE ? OR r.body_md LIKE ?) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50", [$like, $like]);
         $count = count($rows);
         foreach ($rows as $r) {
-            $url = string::replace($r["url_pattern"], "{slug}", $r["slug"]);
-            $results = $results . "<li><a href=\"" . html::escape($url) . "\">" . html::escape($r["title"]) . "</a> <span class=\"muted\">(" . html::escape($r["type"]) . ")</span></li>";
+            $items = array::push($items, ["url" => string::replace($r["url_pattern"], "{slug}", $r["slug"]), "title" => $r["title"], "type" => $r["type"]]);
         }
-        if ($results == "") { $results = "<li class=\"muted\">\"" . html::escape($q) . "\" için sonuç yok.</li>"; }
     }
-    return response::html(view("search.html", ["q" => $q, "count" => $count, "results" => $results]));
+    return response::html(view("search.html", ["q" => $q, "count" => $count, "items" => $items, "searched" => ($q != "")]));
 });
 
 // ── syndication + crawlability: sitemap.xml · robots.txt · RSS feed ──────────

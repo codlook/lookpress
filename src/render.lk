@@ -101,14 +101,32 @@ function cards_html($base, $rows) {
     }
     return $cards;
 }
+// Turn published rows into card DATA (not HTML) — the template renders the markup.
+function card_items($base, $rows) {
+    $items = [];
+    foreach ($rows as $it) {
+        $vals = json::decode($it["fields_json"]);
+        $img = ""; $price = "";
+        if ($vals != null) {
+            try { $img = $vals["image"]; } catch ($e) { $img = ""; }
+            try { $price = $vals["price"]; } catch ($e) { $price = ""; }
+        }
+        if ($img == null) { $img = ""; }
+        if ($price == null) { $price = ""; }
+        $items = array::push($items, [
+            "url" => $base . "/" . $it["slug"], "title" => $it["title"],
+            "image" => $img, "has_image" => ($img != ""),
+            "price" => $price, "has_price" => ($price != "")
+        ]);
+    }
+    return $items;
+}
 function render_listing($c, $type, $lang) {
     $t = load_type($c, $type);
     if ($t == null) { return response::status(404, view("notfound.html", [])); }
     $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
-    $cards = cards_html($base, $rows);
-    if ($cards == "") { $cards = "<p class=\"muted\">No published items yet.</p>"; }
-    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "cards" => $cards]));
+    return response::html(view("list.html", ["label" => $t["label"], "count" => count($rows), "items" => card_items($base, $rows)]));
 }
 
 // ── home + blog index (lang-aware) ───────────────────────────────────────────
