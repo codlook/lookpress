@@ -1,16 +1,26 @@
 {#extends "views/themes/default/layout"}
 {#block "content"}
 <h2>Sepet <span class="muted">({$count})</span></h2>
+{#if $count == 0}<p class="muted">Sepetiniz boş. <a href="/product">Mağazaya göz atın &rarr;</a></p>{/if}
+{#if $has_items}
 <table>
 <thead><tr><th>Ürün</th><th>Fiyat</th><th>Adet</th><th>Tutar</th><th></th></tr></thead>
-<tbody>{!$rows}</tbody>
+<tbody>
+{#each $items as $it}<tr>
+<td>{$it.title}</td>
+<td>{$it.price} &#8378;</td>
+<td><form method="post" action="/cart/update" class="qty-form"><input type="hidden" name="slug" value="{$it.slug}"><input type="number" name="qty" value="{$it.qty}" min="0" class="qty-input"><button class="btn-sm">Güncelle</button></form></td>
+<td>{$it.line} &#8378;</td>
+<td><form method="post" action="/cart/remove" class="inline"><input type="hidden" name="slug" value="{$it.slug}"><button class="del">&times;</button></form></td>
+</tr>{/each}
+</tbody>
 </table>
 <form method="post" action="/cart/coupon" class="coupon-form">
   <input type="text" name="code" value="{$code}" placeholder="Kupon kodu (ör. WELCOME10)">
   <button>Uygula</button>
 </form>
 <p class="muted">Ara toplam: {$subtotal} &#8378;</p>
-{!$disc_row}
+{#if $has_disc}<p class="muted">Kupon <b>{$code}</b>: -{$disc} &#8378;</p>{/if}
 <p class="cart-total">Toplam: <b>{$total} &#8378;</b></p>
 <form method="post" action="/checkout" class="checkout-fields">
   <input type="text" name="cust_name" placeholder="Ad Soyad" required>
@@ -19,4 +29,5 @@
   <textarea name="address" rows="3" placeholder="Teslimat adresi" required></textarea>
   <button>Siparişi tamamla</button>
 </form>
+{/if}
 {/block}

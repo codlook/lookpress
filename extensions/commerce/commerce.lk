@@ -80,21 +80,33 @@ route("POST", "/cart/remove", function() {
 route("GET", "/cart", function() {
     $c = conn();
     $cart = cart_get();
-    $rows_html = ""; $subtotal = 0.0;
+    $items = []; $subtotal = 0.0;
     foreach ($cart as $it) {
         $line = type::to_float($it["price"]) * $it["qty"];
         $subtotal = $subtotal + $line;
-        $rows_html = $rows_html . "<tr><td>" . html::escape($it["title"]) . "</td><td>" . html::escape($it["price"]) . " &#8378;</td><td>" . $it["qty"] . "</td><td>" . $line . " &#8378;</td><td><form method=\"post\" action=\"/cart/remove\" class=\"inline\"><input type=\"hidden\" name=\"slug\" value=\"" . html::escape($it["slug"]) . "\"><button class=\"del\">&times;</button></form></td></tr>";
+        $items = array::push($items, ["title" => $it["title"], "price" => $it["price"], "qty" => $it["qty"], "line" => $line, "slug" => $it["slug"]]);
     }
-    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"5\" class=\"muted\">Sepetiniz boş.</td></tr>"; }
     $code = coupon_code();
     $crow = coupon_row($c, $code);
     $disc = coupon_discount($subtotal, $crow);
     if ($disc > $subtotal) { $disc = $subtotal; }
     $total = $subtotal - $disc;
-    $disc_row = "";
-    if ($crow != null) { $disc_row = "<p class=\"muted\">Kupon <b>" . html::escape($code) . "</b>: -" . $disc . " &#8378;</p>"; }
-    return response::html(ext_view("commerce", "cart.html", ["rows" => $rows_html, "subtotal" => $subtotal, "disc_row" => $disc_row, "total" => $total, "count" => count($cart), "code" => html::escape($code)]));
+    return response::html(ext_view("commerce", "cart.html", [
+        "items" => $items, "count" => count($cart), "has_items" => (count($cart) > 0),
+        "subtotal" => $subtotal, "has_disc" => ($crow != null), "disc" => $disc, "code" => $code, "total" => $total
+    ]));
+});
+route("POST", "/cart/update", function() {
+    $slug = request::post("slug");
+    $qty = type::to_int(request::post("qty"));
+    $cart = cart_get(); $new = [];
+    foreach ($cart as $it) {
+        if ($it["slug"] == $slug) {
+            if ($qty > 0) { $it["qty"] = $qty; $new = array::push($new, $it); }
+        } else { $new = array::push($new, $it); }
+    }
+    cart_save($new);
+    return response::redirect("/cart");
 });
 route("POST", "/checkout", function() {
     // Demo checkout: no payment yet (roadmap Phase A). Persists a real order + line
