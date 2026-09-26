@@ -81,6 +81,12 @@ function field_input($c, $f, $value) {
     if ($t == "tel") {
         return "<label>" . $name . "<input type=\"tel\" name=\"" . $name . "\" value=\"" . $v . "\"></label>";
     }
+    if ($t == "blocks") {
+        // Visual block editor: a hidden textarea holds the block list as JSON; the JS in
+        // layout.html (.block-editor) renders the add/reorder/edit UI and serializes back
+        // into it on change (same JSON-in-textarea pattern as the .field-builder).
+        return "<div class=\"field-block\"><span class=\"fb-label\">" . $name . "</span><div class=\"block-editor\" data-field=\"" . $name . "\"><textarea name=\"" . $name . "\" class=\"blocks-json\" hidden>" . $v . "</textarea></div></div>";
+    }
     if ($t == "image" || $name == "image") {
         // Media field: a URL input + live preview + a "pick from library / upload" button
         // wired to the admin media picker (see the modal + JS in views/admin/layout.html).

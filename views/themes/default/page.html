@@ -3,7 +3,7 @@
 <article class="prose">
 <h2>{$title}</h2>
 {#if $has_fields}<div class="cf">
-{#each $fields as $f}{#if $f.kind == "image"}<img class="cf-image" src="{$f.value}" alt="" onerror="this.style.display='none'">{/if}{#if $f.kind == "price"}<div class="cf-price">{$f.value} &#8378;</div>{/if}{#if $f.kind == "row"}<div class="cf-row"><span class="cf-label">{$f.name}</span> {$f.value}</div>{/if}{#if $f.kind == "url"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="{$f.value}" rel="noopener" target="_blank">{$f.value}</a></div>{/if}{#if $f.kind == "email"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="mailto:{$f.value}">{$f.value}</a></div>{/if}{#if $f.kind == "tel"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="tel:{$f.value}">{$f.value}</a></div>{/if}{/each}
+{#each $fields as $f}{#if $f.kind == "image"}<img class="cf-image" src="{$f.value}" alt="" onerror="this.style.display='none'">{/if}{#if $f.kind == "price"}<div class="cf-price">{$f.value} &#8378;</div>{/if}{#if $f.kind == "row"}<div class="cf-row"><span class="cf-label">{$f.name}</span> {$f.value}</div>{/if}{#if $f.kind == "url"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="{$f.value}" rel="noopener" target="_blank">{$f.value}</a></div>{/if}{#if $f.kind == "email"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="mailto:{$f.value}">{$f.value}</a></div>{/if}{#if $f.kind == "tel"}<div class="cf-row"><span class="cf-label">{$f.name}</span> <a href="tel:{$f.value}">{$f.value}</a></div>{/if}{#if $f.kind == "blocks"}<div class="cf-blocks">{!$f.value}</div>{/if}{/each}
 </div>{/if}
 {!$extra}
 {!$content}

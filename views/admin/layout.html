@@ -268,7 +268,7 @@
 (function(){
  // ---- visual field builder: edit fields[] without hand-writing JSON ----
  function esc(s){return (s==null?'':(''+s)).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
- var FTYPES=['text','textarea','markdown','int','decimal','bool','date','select','image','relation','category','url','email','number','color','tel'];
+ var FTYPES=['text','textarea','markdown','blocks','int','decimal','bool','date','select','image','relation','category','url','email','number','color','tel'];
  document.querySelectorAll('.field-builder').forEach(function(fb){
   var ta=fb.querySelector('textarea'); if(!ta) return;
   var form=fb.closest('form');

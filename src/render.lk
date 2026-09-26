@@ -31,6 +31,11 @@ function content_fields($c, $type, $fields_json) {
         // yeni giriş-varyantı alanları anlamlı bir kind taşısın: url → bağlantı,
         // email → mailto bağlantı, tel → tel bağlantı; diğerleri düz metin (row).
         $ft = ""; try { $ft = $f["type"]; } catch ($e) { $ft = ""; }
+        // blocks: render the whole block list to HTML (not a label:value row).
+        if ($ft == "blocks") {
+            $out = array::push($out, ["name" => $name, "value" => render_blocks($v), "kind" => "blocks"]);
+            continue;
+        }
         if ($kind == "row") {
             if ($ft == "url") { $kind = "url"; }
             else { if ($ft == "email") { $kind = "email"; }
@@ -39,6 +44,69 @@ function content_fields($c, $type, $fields_json) {
         $out = array::push($out, ["name" => $name, "value" => $v, "kind" => $kind]);
     }
     return $out;
+}
+
+// ── block content ─────────────────────────────────────────────────────────────
+// A "blocks" field stores an ordered list of typed blocks (the visual-editor model,
+// like WP's block editor) as JSON in fields_json: [{"type":"...","data":{...}}, …].
+// render_blocks turns it into HTML. Everything user-authored is html::escape'd; the
+// admin is trusted but we never trust field values as markup. Missing keys on a
+// json::decode map return null (not throw) — read every key with a null guard.
+function block_val($d, $k) {
+    $v = $d[$k];
+    if ($v == null) { return ""; }
+    return $v;
+}
+function render_one_block($t, $d) {
+    if ($t == "heading") {
+        $tag = "h2"; if (block_val($d, "level") == "3") { $tag = "h3"; }
+        return "<" . $tag . ">" . html::escape(block_val($d, "text")) . "</" . $tag . ">";
+    }
+    if ($t == "paragraph") {
+        return "<p>" . string::replace(html::escape(block_val($d, "text")), "\n", "<br>") . "</p>";
+    }
+    if ($t == "image") {
+        $cap = block_val($d, "caption");
+        $fig = "<figure class=\"blk-img\"><img src=\"" . html::escape(block_val($d, "url")) . "\" alt=\"" . html::escape(block_val($d, "alt")) . "\">";
+        if ($cap != "") { $fig = $fig . "<figcaption>" . html::escape($cap) . "</figcaption>"; }
+        return $fig . "</figure>";
+    }
+    if ($t == "gallery") {
+        $imgs = $d["images"]; if ($imgs == null) { $imgs = []; }
+        $g = "<div class=\"blk-gallery\">";
+        foreach ($imgs as $u) { $g = $g . "<img src=\"" . html::escape($u) . "\" alt=\"\">"; }
+        return $g . "</div>";
+    }
+    if ($t == "button") {
+        return "<p class=\"blk-btn-wrap\"><a class=\"btn\" href=\"" . html::escape(block_val($d, "url")) . "\">" . html::escape(block_val($d, "label")) . "</a></p>";
+    }
+    if ($t == "quote") {
+        $cite = block_val($d, "cite");
+        $q = "<blockquote>" . string::replace(html::escape(block_val($d, "text")), "\n", "<br>");
+        if ($cite != "") { $q = $q . "<cite>" . html::escape($cite) . "</cite>"; }
+        return $q . "</blockquote>";
+    }
+    if ($t == "list") {
+        $items = $d["items"]; if ($items == null) { $items = []; }
+        $l = "<ul class=\"blk-list\">";
+        foreach ($items as $it) { $l = $l . "<li>" . html::escape($it) . "</li>"; }
+        return $l . "</ul>";
+    }
+    if ($t == "divider") { return "<hr class=\"blk-hr\">"; }
+    return "";
+}
+function render_blocks($json) {
+    if ($json == null) { return ""; }
+    if ($json == "") { return ""; }
+    $blocks = json::decode($json);
+    if ($blocks == null) { return ""; }
+    $html = "";
+    foreach ($blocks as $b) {
+        $t = $b["type"]; if ($t == null) { $t = ""; }
+        $d = $b["data"]; if ($d == null) { $d = array::new_assoc(); }
+        $html = $html . render_one_block($t, $d);
+    }
+    return $html;
 }
 
 // tr = no prefix, en = /en. The versioned core carries a `lang` column so a
