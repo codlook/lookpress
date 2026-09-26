@@ -2,6 +2,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{$page_title}</title>
 {!$head_extra}
+{#if $g.has_og_image}<meta property="og:image" content="{$g.seo_og_image}">{/if}
+{!$g.analytics_head}
 <style>
  /* ── Renk sistemi: skin'ler CSS değişkenlerini ezer ── */
  :root{
@@ -256,6 +258,15 @@
  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head>
 <body data-theme="{$skin}">
+<style>
+ /* ── Sabit Alanlar: duyuru barı + footer link/sosyal/iletişim ── */
+ .announce{background:var(--accent);color:var(--accent-fg);text-align:center;font-size:14px;padding:8px 16px}
+ .footer-links,.footer-social,.footer-contact{display:flex;flex-wrap:wrap;gap:6px 14px;width:100%;justify-content:center}
+ .footer-links a,.footer-social a,.footer-contact a{color:var(--fg);font-size:13px}
+ .footer-contact span{font-size:13px;color:var(--muted)}
+ .footer-text{width:100%;text-align:center;color:var(--muted);font-size:13px}
+</style>
+{#if $g.has_announcement}<div class="announce">{$g.announcement}</div>{/if}
 <header class="site-header">
  <div class="header-inner">
   <h1 class="brand"><a href="/">{$site_title}</a></h1>
@@ -270,6 +281,10 @@
 <main>{#block "content"}{/block}</main>
 <footer class="site-footer">
  <div class="footer-inner">
+  {#if $g.has_footer_links}<nav class="footer-links">{#each $g.footer_links as $l}<a href="{$l.url}">{$l.label}</a>{/each}</nav>{/if}
+  {#if $g.has_social}<div class="footer-social">{!$g.social_html}</div>{/if}
+  {#if $g.has_contact}<div class="footer-contact">{!$g.contact_html}</div>{/if}
+  {#if $g.has_footer_text}<span class="footer-text">{$g.footer_text}</span>{/if}
   <span>&copy; {$site_title}</span>
   <span>LookPress ile geliştirildi &middot; <a href="/admin">Admin</a></span>
  </div>

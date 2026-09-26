@@ -13,6 +13,12 @@ services:
       - lp_uploads:/app/uploads
     environment:
       - DB_DSN=sqlite:///data/cms.db
+      # Bytecode VM OFF (tree-walk interpreter). The LOOK 1.0 VM miscompiles an
+      # app of this size (one top-level unit, ~69 routes + the Wave 2 modules):
+      # some handlers return empty 200/JSON bodies and DB handles get corrupted,
+      # while the interpreter runs the same code correctly. Slower per request but
+      # correct; flip to 1 once the core VM fix lands (tracked in docs/cms-spec.md).
+      - LOOK_BYTECODE=0
       - LOOK_SESSION_SECURE=0 # plain-HTTP dev; set 1 (or use a TLS proxy) in prod
       - LOOKPRESS_SEED=1       # seed demo content on first run
       # Admin password. Explicit dev value here (NOT a hidden code default) —

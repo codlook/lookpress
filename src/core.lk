@@ -50,6 +50,52 @@ function settings_all($c) {
     cache::set("core:settings", $m, 60);
     return $m;
 }
+// Tema global'leri: Ayarlar → Genel / SEO / Sabit Alanlar değerleri tek assoc'ta
+// ({$g.*}). settings_all() cache'li olduğu için ucuz; şablon fonksiyon çağıramaz,
+// o yüzden {#if} için has_* boolean'ları burada hazırlanır.
+function theme_globals($c) {
+    $g = array::new_assoc();
+    $map = [
+        ["analytics_head", "analytics_head"], ["seo_description", "seo_description"], ["seo_og_image", "seo_og_image"],
+        ["contact_email", "contact_email"], ["contact_phone", "contact_phone"], ["contact_address", "contact_address"],
+        ["default_lang", "default_lang"],
+        ["announcement", "sabit_header_announcement"], ["footer_text", "sabit_footer_text"],
+        ["social_instagram", "sabit_social_instagram"], ["social_facebook", "sabit_social_facebook"],
+        ["social_x", "sabit_social_x"], ["social_youtube", "sabit_social_youtube"], ["social_linkedin", "sabit_social_linkedin"]
+    ];
+    foreach ($map as $m) {
+        $v = setting_get($c, $m[1], "");
+        if ($v == null) { $v = ""; }
+        $g[$m[0]] = $v;
+    }
+    $links = [];
+    $raw = setting_get($c, "sabit_footer_links", "");
+    if ($raw != null && $raw != "") {
+        $dec = json::decode($raw);
+        if ($dec != null) { $links = $dec; }
+    }
+    $g["footer_links"] = $links;
+    $g["has_footer_links"] = (count($links) > 0);
+    $g["has_announcement"] = ($g["announcement"] != "");
+    $g["has_contact"] = ($g["contact_email"] != "" || $g["contact_phone"] != "" || $g["contact_address"] != "");
+    $g["has_social"] = ($g["social_instagram"] != "" || $g["social_facebook"] != "" || $g["social_x"] != "" || $g["social_youtube"] != "" || $g["social_linkedin"] != "");
+    $g["has_footer_text"] = ($g["footer_text"] != "");
+    $g["has_og_image"] = ($g["seo_og_image"] != "");
+    // Sosyal + iletişim linklerini burada hazır HTML yap ({!$g.social_html}) — şablonda
+    // boş-string koşulu yerine .lk'de net kontrol, hepsi html::escape'li.
+    $sh = "";
+    $socials = [["social_instagram", "Instagram"], ["social_facebook", "Facebook"], ["social_x", "X"], ["social_youtube", "YouTube"], ["social_linkedin", "LinkedIn"]];
+    foreach ($socials as $s) {
+        if ($g[$s[0]] != "") { $sh = $sh . "<a href=\"" . html::escape($g[$s[0]]) . "\" rel=\"noopener\" target=\"_blank\">" . $s[1] . "</a>"; }
+    }
+    $g["social_html"] = $sh;
+    $ch = "";
+    if ($g["contact_email"] != "")   { $ch = $ch . "<a href=\"mailto:" . html::escape($g["contact_email"]) . "\">" . html::escape($g["contact_email"]) . "</a>"; }
+    if ($g["contact_phone"] != "")   { $ch = $ch . "<a href=\"tel:" . html::escape($g["contact_phone"]) . "\">" . html::escape($g["contact_phone"]) . "</a>"; }
+    if ($g["contact_address"] != "") { $ch = $ch . "<span>" . html::escape($g["contact_address"]) . "</span>"; }
+    $g["contact_html"] = $ch;
+    return $g;
+}
 function setting_get($c, $key, $default) {
     $m = settings_all($c);
     if (array::contains(array::keys($m), $key)) { return $m[$key]; }
@@ -116,6 +162,7 @@ function view($tpl, $data) {
     if (!array::contains(array::keys($data), "page_title")) { $data["page_title"] = site_title(); }
     if (!array::contains(array::keys($data), "nav_items")) { $data["nav_items"] = menu_items(conn(), "primary"); }
     $data["csrf"] = csrf_field();   // public forms print {!$csrf} (src/security.lk)
+    $data["g"] = theme_globals(conn());   // Ayarlar → Sabit Alanlar / SEO / iletişim (tema {$g.*})
     return template::render(theme_tpl($theme, $tpl), $data);
 }
 // Admin chrome data every admin page needs: the logged-in user, the super flag,
@@ -254,6 +301,7 @@ function ext_view($ext, $tpl, $data) {
     if (!array::contains(array::keys($data), "page_title")) { $data["page_title"] = site_title(); }
     if (!array::contains(array::keys($data), "nav_items")) { $data["nav_items"] = menu_items(conn(), "primary"); }
     $data["csrf"] = csrf_field();   // extension public forms print {!$csrf}
+    $data["g"] = theme_globals(conn());
     return template::render("extensions/" . $ext . "/views/" . $tpl, $data);
 }
 function ext_admin_view($ext, $tpl, $data) {

@@ -113,11 +113,29 @@ verified on a fresh volume (`/en` canary 200, route count ≤ 70, 0 VM fallback)
 - ✅ **Üyeler**: `/hesap/{action}` GET+POST + `/admin/uyeler` (3 routes). Deactivation toggle → Wave 2.
 - Known debt: the `xp_*` seam is single-override (commerce holds xp_migrate/xp_admin_nav) — members uses lazy `CREATE TABLE IF NOT EXISTS` and a sidebar link from the spine; a multi-extension hook chain is a future core-of-LookPress decision. Route budget: **68/70** — Wave 2+ must be route-free.
 
-### Wave 2 — communication, settings, components
-- 🟡 **İletişim modülü**: forms exist; add submission status workflow (Destek Biletleri: açık/işlemde/kapalı), İş Başvuruları view, notes, CSV export.
-- 🟡 **Ayarlar**: sectioned settings (Genel / Tema / Dil / SEO / İletişim); Sabit Alanlar as global fields.
-- ⬜ **Components**: slider, columns, hero, module-listing, form-embed blocks; theme component contract.
-- ⬜ **Dashboard**: real at-a-glance panel (counts, recent submissions/orders, quick actions).
+### Wave 2 — communication, settings, components ✅ (shipped 2026-09-26, 69/70 routes)
+- ✅ **İletişim modülü**: submission status workflow (açık/işlemde/kapalı) + timestamped notes + delete on one route (`POST /admin/form/{key}`), status filters/counts, CSV export (BOM, RFC4180, formula-injection guard); demo forms iletisim / is-basvuru.
+- ✅ **Ayarlar**: sectioned (Genel / SEO / Tema / Dil / Sabit Alanlar) on the existing route; the theme prints them via `{$g.*}` (announcement bar, footer text/links/social/contact, og:image default, analytics head snippet) and `/robots.txt` appends `robots_extra`.
+- ✅ **Components**: hero, slider (manual or module), columns (nested, depth ≤ 3), module listing, form embed, map (Google embed only), video (YouTube-nocookie/Vimeo), html (trusted admin) — editor cards + theme CSS + `docs/theme-components.md`.
+- ✅ **Dashboard**: module counters per group, İletişim / E-Ticaret / Üyeler panels, system summary, quick actions.
+- ✅ **Backups** (pulled from Wave 3): `scripts/backup.sh` / `restore.sh` (docker or Plesk; SQLite online backup via sidecar, MySQL/Postgres dumps), `docs/ops-backup.md`.
+
+### ⚠️ Core blocker found in Wave 2 — the LOOK 1.0 bytecode VM miscompiles LookPress at this size
+With one top-level compilation unit (~69 routes + the Wave 2 modules) the VM does not
+drop routes anymore — it **miscompiles**: some handlers return an empty `200
+application/json` body (`/{a}`, `/admin/forms`, `/admin/form/{key}`) and others throw
+bogus `db: connection not found / invalid connection handle` and only survive via the
+interpreter fallback. The same code is fully correct under the tree-walk interpreter.
+**Workaround shipped:** `LOOK_BYTECODE=0` in docker-compose.yml (and required for the
+Plesk service env) — correct but slower per request. **Permanent fix is a LOOK core
+decision** (VM compiler: per-`use`-file compilation units / separate register scope for
+route closures / lift the 256-register cap / fail loud on register exhaustion instead of
+emitting wrong code). Reproduction: run the same image with `-e LOOK_BYTECODE=0` on a
+second port and compare response byte counts. Until fixed, LookPress must ship with the
+VM off, and the route budget stays at ≤ 69.
+
+- Follow-up (small): `response::status(404, body)` ignores the body in the core, so
+  404 pages are blank — render the not-found view with `response::html` + a status call.
 
 ### Wave 3 — polish & proof
 - ⬜ Populated demo site per vertical (kurumsal / haber / e-ticaret) + first-run onboarding.
