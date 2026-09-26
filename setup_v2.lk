@@ -135,10 +135,15 @@ function seed_demo_item($c, $type, $slug, $lang, $title, $body, $fields) {
     return 1;
 }
 if (env("LOOKPRESS_SEED", "0") == "1") {
-    // Core demo: a plain page. Commerce demo (product type + products + coupon) is
-    // seeded by the commerce extension's own seed hook below — the core seeds no shop.
+    // Core demo: a plain page + a few example content types so the grouped
+    // "İçerik Yönetimi" sidebar is visible out of the box. Each is a full module
+    // (auto CRUD + API + public URL) — delete them or set LOOKPRESS_SEED=0 for a
+    // clean start. This is exactly how you'd add "haberler / duyurular / ekipler".
     seed_demo_item($c, "page", "about", "en", "About us", "LookPress is a pure-LOOK web platform.", []);
-    print("=== seeded core demo content (en page) ===\n");
+    seed_type($c, "haber",  "Haberler",  "/haber/{slug}",  $common);
+    seed_type($c, "duyuru", "Duyurular", "/duyuru/{slug}", $common);
+    seed_type($c, "ekip",   "Ekipler",   "/ekip/{slug}",   $common);
+    print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) ===\n");
 }
 // Extensions seed their own demo data (commerce overrides xp_seed → product type +
 // demo products + WELCOME10, itself gated on LOOKPRESS_SEED). Core default is a no-op.

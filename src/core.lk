@@ -62,6 +62,18 @@ function admin_chrome($data) {
     $data["nav_user"] = $un;
     $data["nav_super"] = is_super();
     $data["ext_nav"] = xp_admin_nav(["super" => is_super()]);
+    // Dynamic "İçerik Yönetimi" nav: one entry per content type (haberler, blog,
+    // duyurular … appear automatically as they're created), minus types an
+    // extension manages in its own group (commerce → product).
+    $c = conn();
+    $hidden = xp_hidden_types();
+    $types = db::query($c, "SELECT slug, label FROM content_types ORDER BY label", []);
+    $nt = "";
+    foreach ($types as $t) {
+        if (array::contains($hidden, $t["slug"])) { continue; }
+        $nt = $nt . "<a href=\"/admin/type/" . $t["slug"] . "\" data-nav=\"/admin/type/" . $t["slug"] . "\"><span class=\"ic\">▦</span> " . html::escape($t["label"]) . "</a>";
+    }
+    $data["nav_types"] = $nt;
     return $data;
 }
 // Admin has its OWN UI, independent of the active site theme (views/admin/) — a

@@ -251,9 +251,13 @@ function xp_home_sections($ctx) {
     if (count($rows) == 0) { return ""; }
     return "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $rows) . "</div>";
 }
+// commerce manages the "product" content type in its OWN group, so the core's
+// "İçerik Yönetimi" list skips it.
+function xp_hidden_types() { return ["product"]; }
 // Admin sidebar: the "Ticaret" nav group (coupons gated to super users).
 function xp_admin_nav($ctx) {
     $out = "<div class=\"grp\">Ticaret</div>"
+         . "<a href=\"/admin/type/product\" data-nav=\"/admin/type/product\"><span class=\"ic\">▦</span> Ürünler</a>"
          . "<a href=\"/admin/orders\" data-nav=\"/admin/order\"><span class=\"ic\">▧</span> Siparişler</a>";
     $super = false; if ($ctx != null) { try { $super = $ctx["super"]; } catch ($e) { $super = false; } }
     if ($super) {

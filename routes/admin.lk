@@ -62,7 +62,23 @@ route("GET", "/admin", function() {
     ]));
 });
 
-// ── type-admin: create a content type from the admin ─────────────────────────
+// ── type-admin: manage content types like modules (list + create) ────────────
+route("GET", "/admin/types", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    $c = conn();
+    $types = db::query($c, "SELECT slug, label, url_pattern FROM content_types ORDER BY label", []);
+    $rows = "";
+    foreach ($types as $t) {
+        $n = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content WHERE type = ?", [$t["slug"]])[0]["n"]);
+        $rows = $rows . "<tr><td><a href=\"/admin/type/" . $t["slug"] . "\"><b>" . html::escape($t["label"]) . "</b></a></td>"
+              . "<td><code>" . html::escape($t["slug"]) . "</code></td>"
+              . "<td class=\"muted\">" . html::escape($t["url_pattern"]) . "</td>"
+              . "<td>" . $n . "</td>"
+              . "<td><a href=\"/admin/type/" . $t["slug"] . "\">Yönet</a> &middot; <a href=\"/admin/type/" . $t["slug"] . "/new\">+ Ekle</a></td></tr>";
+    }
+    if ($rows == "") { $rows = "<tr><td colspan=\"5\" class=\"muted\">Henüz tip yok.</td></tr>"; }
+    return response::html(admin_view("admin_types.html", ["rows" => $rows, "count" => count($types)]));
+});
 route("GET", "/admin/types/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     return response::html(admin_view("admin_type_def.html", [

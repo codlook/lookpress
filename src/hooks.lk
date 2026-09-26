@@ -15,6 +15,9 @@ function xp_content_head($ctx) { return ""; }
 function xp_home_sections($ctx) { return ""; }
 // Admin sidebar: extra nav items ($ctx.super = is the viewer a super admin).
 function xp_admin_nav($ctx) { return ""; }
+// Content types an extension manages in its OWN nav group, so the core's
+// "İçerik Yönetimi" list skips them (commerce → ["product"]). Default: hide none.
+function xp_hidden_types() { return []; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }
