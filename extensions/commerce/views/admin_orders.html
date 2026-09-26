@@ -1,8 +1,11 @@
 {#extends "views/admin/layout"}
 {#block "content"}
 <div class="section-head"><h2>Siparişler <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
-<table>
+{#if $count == 0}<p class="muted">Henüz sipariş yok.</p>{/if}
+<div class="table-wrap"><table>
 <thead><tr><th>No</th><th>E-posta</th><th>Tutar</th><th>Durum</th></tr></thead>
-<tbody>{!$rows}</tbody>
-</table>
+<tbody>
+{#each $items as $it}<tr><td><a href="/admin/order/{$it.id}">#{$it.id}</a></td><td>{$it.email}</td><td>{$it.total} &#8378;</td><td>{$it.status}</td></tr>{/each}
+</tbody>
+</table></div>
 {/block}

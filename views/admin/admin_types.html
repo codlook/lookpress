@@ -4,6 +4,8 @@
 <p class="muted" style="font-size:13px;margin:0 0 12px">Her içerik tipi bir modül gibidir: tanımladığınızda otomatik CRUD, API (<code>/api/&lt;tip&gt;</code>) ve public URL kazanır ve sol menüde kendi bölümü olur.</p>
 <div class="table-wrap"><table>
 <thead><tr><th>Tip</th><th>Slug</th><th>URL deseni</th><th>İçerik</th><th>İşlemler</th></tr></thead>
-<tbody>{!$rows}</tbody>
+<tbody>
+{#each $items as $it}<tr><td><a href="/admin/type/{$it.slug}"><b>{$it.label}</b></a></td><td><code>{$it.slug}</code></td><td class="muted">{$it.url_pattern}</td><td>{$it.n}</td><td><a href="/admin/type/{$it.slug}">Yönet</a> &middot; <a href="/admin/type/{$it.slug}/new">+ Ekle</a></td></tr>{/each}
+</tbody>
 </table></div>
 {/block}

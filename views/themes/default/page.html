@@ -2,6 +2,9 @@
 {#block "content"}
 <article>
 <h2>{$title}</h2>
+{#if $has_fields}<div class="cf">
+{#each $fields as $f}{#if $f.kind == "image"}<img class="cf-image" src="{$f.value}" alt="" onerror="this.style.display='none'">{/if}{#if $f.kind == "price"}<div class="cf-price">{$f.value} &#8378;</div>{/if}{#if $f.kind == "row"}<div class="cf-row"><span class="cf-label">{$f.name}</span> {$f.value}</div>{/if}{/each}
+</div>{/if}
 {!$extra}
 {!$content}
 </article>

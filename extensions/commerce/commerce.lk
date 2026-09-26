@@ -132,14 +132,12 @@ route("GET", "/admin/orders", function() {
     if (!can("orders")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $orders = db::query($c, "SELECT id, email, total, status, created_at FROM orders ORDER BY id DESC", []);
-    $rows_html = "";
+    $items = [];
     foreach ($orders as $o) {
-        $mail = $o["email"];
-        if ($mail == "") { $mail = "—"; }
-        $rows_html = $rows_html . "<tr><td><a href=\"/admin/order/" . $o["id"] . "\">#" . $o["id"] . "</a></td><td>" . html::escape($mail) . "</td><td>" . html::escape($o["total"]) . " &#8378;</td><td>" . html::escape($o["status"]) . "</td></tr>";
+        $mail = $o["email"]; if ($mail == "") { $mail = "—"; }
+        $items = array::push($items, ["id" => $o["id"], "email" => $mail, "total" => $o["total"], "status" => $o["status"]]);
     }
-    if ($rows_html == "") { $rows_html = "<tr><td colspan=\"4\" class=\"muted\">Henüz sipariş yok.</td></tr>"; }
-    return response::html(ext_admin_view("commerce", "admin_orders.html", ["rows" => $rows_html, "count" => count($orders)]));
+    return response::html(ext_admin_view("commerce", "admin_orders.html", ["items" => $items, "count" => count($orders)]));
 });
 route("GET", "/admin/order/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }

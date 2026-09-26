@@ -1,8 +1,11 @@
 {#extends "views/admin/layout"}
 {#block "content"}
 <div class="section-head"><h2>Form gönderimleri <span class="muted">({$count})</span></h2><a class="more" href="/admin">&larr; Admin</a></div>
-<table>
+{#if $count == 0}<p class="muted">Henüz gönderim yok.</p>{/if}
+<div class="table-wrap"><table>
 <thead><tr><th>Form</th><th>Ad</th><th>E-posta</th><th>Mesaj</th></tr></thead>
-<tbody>{!$rows}</tbody>
-</table>
+<tbody>
+{#each $items as $it}<tr><td>{$it.form_key}</td><td>{$it.name}</td><td>{$it.email}</td><td>{$it.message}</td></tr>{/each}
+</tbody>
+</table></div>
 {/block}

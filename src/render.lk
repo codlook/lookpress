@@ -8,17 +8,17 @@ use string;
 use type;
 use array;
 
-// ── generic custom-field renderer ────────────────────────────────────────────
-// EVERY type renders its own fields with no type-specific code: read the type's
-// field definitions + the revision's stored values, emit a block. `image`/`price`
-// get nicer markup; everything else is a labelled row.
-function render_fields_html($c, $type, $fields_json) {
+// ── generic custom-field data ────────────────────────────────────────────────
+// EVERY type exposes its own fields with no type-specific code: read the type's
+// field definitions + the revision's stored values, return DATA rows the template
+// renders. `image`/`price` carry a kind so page.html gives them nicer markup.
+function content_fields($c, $type, $fields_json) {
+    $out = [];
     $trow = db::query($c, "SELECT fields_json FROM content_types WHERE slug = ?", [$type]);
-    if (count($trow) == 0) { return ""; }
+    if (count($trow) == 0) { return $out; }
     $defs = json::decode($trow[0]["fields_json"]);
     $vals = json::decode($fields_json);
-    if ($vals == null) { return ""; }
-    $out = "";
+    if ($vals == null) { return $out; }
     foreach ($defs as $f) {
         $name = $f["name"];
         if ($name == "title" || $name == "body") { continue; }
@@ -26,18 +26,11 @@ function render_fields_html($c, $type, $fields_json) {
         try { $v = $vals[$name]; } catch ($e) { $v = ""; }
         if ($v == null) { $v = ""; }
         if ($v == "") { continue; }
-        if ($name == "image") {
-            $out = $out . "<img class=\"cf-image\" src=\"" . html::escape($v) . "\" alt=\"\" onerror=\"this.style.display='none'\">";
-        } else {
-            if ($name == "price") {
-                $out = $out . "<div class=\"cf-price\">" . html::escape($v) . " &#8378;</div>";
-            } else {
-                $out = $out . "<div class=\"cf-row\"><span class=\"cf-label\">" . html::escape($name) . "</span> " . html::escape($v) . "</div>";
-            }
-        }
+        $kind = "row";
+        if ($name == "image") { $kind = "image"; } else { if ($name == "price") { $kind = "price"; } }
+        $out = array::push($out, ["name" => $name, "value" => $v, "kind" => $kind]);
     }
-    if ($out == "") { return ""; }
-    return "<div class=\"cf\">" . $out . "</div>";
+    return $out;
 }
 
 // tr = no prefix, en = /en. The versioned core carries a `lang` column so a
@@ -66,7 +59,7 @@ function render_published($type, $slug, $lang) {
     $c = conn();
     $rows = db::query($c, "SELECT r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.slug = ? AND c.lang = ? AND c.published_rev > 0", [$type, $slug, $lang]);
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
-    $extra = render_fields_html($c, $type, $rows[0]["fields_json"]);
+    $fields = content_fields($c, $type, $rows[0]["fields_json"]);
     $vals = json::decode($rows[0]["fields_json"]);
     $desc = string::substr(html::strip($rows[0]["body_html"]), 0, 155);
     // Extension seam: listeners may add UI below the body (commerce → add-to-cart)
@@ -74,9 +67,9 @@ function render_published($type, $slug, $lang) {
     // no extension and knows nothing of price/cart.
     $ctx = ["type" => $type, "slug" => $slug, "lang" => $lang, "vals" => $vals,
             "title" => $rows[0]["title"], "desc" => $desc, "body_html" => $rows[0]["body_html"]];
-    $extra = $extra . xp_content_after_body($ctx);
+    $extra = xp_content_after_body($ctx);
     $head = seo_head($rows[0]["title"], $desc, "website", "") . xp_content_head($ctx) . hreflang_links($c, $type, $slug);
-    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "extra" => $extra, "head_extra" => $head]));
+    return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "fields" => $fields, "has_fields" => (count($fields) > 0), "extra" => $extra, "head_extra" => $head]));
 }
 
 // ── generic listing (catalog) — ONE renderer for EVERY type ──────────────────
