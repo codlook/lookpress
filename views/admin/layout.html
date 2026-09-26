@@ -200,6 +200,18 @@
  .menu-form{max-width:560px}
  .menu-row{display:flex;gap:8px;margin-bottom:8px}
  .menu-row input{margin-top:0;flex:1}
+
+ /* ---- markdown editor toolbar ---- */
+ .md-wrap{margin-top:5px}
+ .md-wrap textarea{margin-top:0;border-top-left-radius:0;border-top-right-radius:0}
+ .md-toolbar{display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:6px 7px;
+   background:#f8fafc;border:1px solid #cbd5e1;border-bottom:0;border-radius:8px 8px 0 0}
+ .md-tb-btn{background:#fff;color:var(--fg);border:1px solid var(--line);padding:5px 9px;
+   border-radius:6px;font-size:13px;line-height:1.1;font-weight:600;cursor:pointer;transition:all .12s;min-width:32px}
+ .md-tb-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+ .md-tb-btn.md-tb-code{font-family:ui-monospace,Menlo,Consolas,monospace}
+ .md-tb-sep{width:1px;align-self:stretch;background:var(--line);margin:2px 3px}
+ @media(max-width:480px){ .md-tb-btn{padding:6px 8px} }
 </style></head>
 <body>
 <div class="layout">
@@ -300,10 +312,14 @@
 
  // ---- media picker: shared modal for all image fields ----
  var modal=document.getElementById('mpModal'),grid=document.getElementById('mpGrid'),
-     upload=document.getElementById('mpUpload'),target=null;
- function openModal(inp){target=inp;modal.classList.add('open');loadGrid();}
- function closeModal(){modal.classList.remove('open');target=null;}
+     upload=document.getElementById('mpUpload'),target=null,targetTa=null;
+ // Görsel FIELD için: input'a url yaz (mevcut davranış).
+ function openModal(inp){target=inp;targetTa=null;modal.classList.add('open');loadGrid();}
+ // Markdown TEXTAREA için: seçilen görseli imlece ![](url) olarak ekle.
+ function openModalForTextarea(ta){targetTa=ta;target=null;modal.classList.add('open');loadGrid();}
+ function closeModal(){modal.classList.remove('open');target=null;targetTa=null;}
  function pick(url){
+  if(targetTa){insertAtCursor(targetTa,'!['+']('+url+')');closeModal();return;}
   if(!target)return;
   target.value=url;
   var field=target.closest('.media-field'),prev=field&&field.querySelector('.mf-prev');
@@ -338,6 +354,70 @@
   }).catch(function(){grid.innerHTML='<div class="mp-empty">Yükleme başarısız.</div>';});
  });
  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+
+ // ---- markdown editör: hafif biçimlendirme araç çubuğu ----
+ // İmleç konumuna metin ekler; seçim yoksa imleci eklenenin içine getirir.
+ function insertAtCursor(ta,text,caretBack){
+  var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
+  ta.value=v.slice(0,s)+text+v.slice(e);
+  var pos=s+text.length-(caretBack||0);
+  ta.focus();ta.selectionStart=ta.selectionEnd=pos;
+  ta.dispatchEvent(new Event('input',{bubbles:true}));
+ }
+ // Seçimi before/after ile sarar; seçim yoksa imleci ortaya koyar.
+ function wrap(ta,before,after){
+  var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value,sel=v.slice(s,e);
+  ta.value=v.slice(0,s)+before+sel+after+v.slice(e);
+  ta.focus();
+  if(s===e){var p=s+before.length;ta.selectionStart=ta.selectionEnd=p;}
+  else{ta.selectionStart=s+before.length;ta.selectionEnd=e+before.length;}
+  ta.dispatchEvent(new Event('input',{bubbles:true}));
+ }
+ // Seçili satır(lar)ın başına önek ekler (başlık/liste/alıntı).
+ function prefixLines(ta,prefix){
+  var s=ta.selectionStart,e=ta.selectionEnd,v=ta.value;
+  var ls=v.lastIndexOf('\n',s-1)+1;
+  var le=v.indexOf('\n',e);if(le<0)le=v.length;
+  var block=v.slice(ls,le).split('\n').map(function(l){return prefix+l;}).join('\n');
+  ta.value=v.slice(0,ls)+block+v.slice(le);
+  ta.focus();ta.selectionStart=ls;ta.selectionEnd=ls+block.length;
+  ta.dispatchEvent(new Event('input',{bubbles:true}));
+ }
+ // Buton tanımları: [etiket, başlık(title), eylem]
+ var MD_BTNS=[
+  ['B','Kalın',function(ta){wrap(ta,'**','**');}],
+  ['i','İtalik',function(ta){wrap(ta,'*','*');}],
+  ['H2','Başlık (H2)',function(ta){prefixLines(ta,'## ');}],
+  ['sep'],
+  ['🔗','Bağlantı',function(ta){
+    var s=ta.selectionStart,e=ta.selectionEnd,sel=ta.value.slice(s,e);
+    if(sel){wrap(ta,'[',']('+'url)');}
+    else{insertAtCursor(ta,'[metin](url)',4);}
+  }],
+  ['•','Liste',function(ta){prefixLines(ta,'- ');}],
+  ['❝','Alıntı',function(ta){prefixLines(ta,'> ');}],
+  ['</>','Satır içi kod',function(ta){wrap(ta,'`','`');},'md-tb-code'],
+  ['sep'],
+  ['🖼','Görsel ekle',function(ta){openModalForTextarea(ta);}]
+ ];
+ // İçerik formundaki markdown/textarea alanlarına araç çubuğu ekle.
+ // Seçici: SADECE data-md-form formundaki textarea'lar; SEO açıklaması (seo_desc) hariç.
+ // Slug/SEO başlığı <input> olduğu için zaten eşleşmez; field-builder ayrı şablonda.
+ document.querySelectorAll('form[data-md-form] textarea:not([name="seo_desc"])').forEach(function(ta){
+  if(ta.dataset.mdReady)return;ta.dataset.mdReady='1';
+  var wrapEl=document.createElement('div');wrapEl.className='md-wrap';
+  ta.parentNode.insertBefore(wrapEl,ta);
+  var bar=document.createElement('div');bar.className='md-toolbar';
+  MD_BTNS.forEach(function(def){
+   if(def[0]==='sep'){var sp=document.createElement('span');sp.className='md-tb-sep';bar.appendChild(sp);return;}
+   var btn=document.createElement('button');btn.type='button';
+   btn.className='md-tb-btn'+(def[3]?' '+def[3]:'');
+   btn.textContent=def[0];btn.title=def[1];
+   btn.addEventListener('click',function(){def[2](ta);});
+   bar.appendChild(btn);
+  });
+  wrapEl.appendChild(bar);wrapEl.appendChild(ta);
+ });
 
  var b=document.getElementById('burger'),bd=document.getElementById('backdrop');
  function close(){document.body.classList.remove('nav-open');}

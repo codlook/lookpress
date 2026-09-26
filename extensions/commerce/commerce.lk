@@ -218,8 +218,18 @@ route("GET", "/admin/categories", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
     if (!can("products")) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
-    $cats = category_all($c);
-    return response::html(ext_admin_view("commerce", "admin_categories.html", ["items" => $cats, "count" => count($cats)]));
+    $tree = category_tree($c);
+    // Girintiyi .lk'te hazırla (şablonda aritmetik yok): her satıra ham "pad" öneği.
+    $items = [];
+    $parent_opts = "<option value=\"0\">— (üst kategori yok) —</option>";
+    foreach ($tree as $cat) {
+        $pad = "";
+        $i = 0; while ($i < $cat["depth"]) { $pad = $pad . "<span class=\"tree-indent\">&nbsp;&nbsp;&nbsp;&nbsp;</span>"; $i = $i + 1; }
+        $branch = ""; if ($cat["depth"] > 0) { $branch = "└ "; }
+        $items = array::push($items, ["id" => $cat["id"], "name" => $cat["name"], "slug" => $cat["slug"], "pad" => $pad, "branch" => $branch]);
+        $parent_opts = $parent_opts . "<option value=\"" . $cat["id"] . "\">" . category_indent($cat["depth"], "— ") . html::escape($cat["name"]) . "</option>";
+    }
+    return response::html(ext_admin_view("commerce", "admin_categories.html", ["items" => $items, "count" => count($tree), "parent_options" => $parent_opts]));
 });
 route("POST", "/admin/categories/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
@@ -227,8 +237,23 @@ route("POST", "/admin/categories/new", function() {
     $c = conn();
     $name = string::trim(request::post("name"));
     $slug = string::trim(request::post("slug"));
+    // Opsiyonel üst kategori. 0 = üst yok. Var olmayan bir id verilirse köke düşür.
+    $praw = request::post("parent_id"); if ($praw == null) { $praw = "0"; }
+    $parent_id = type::to_int($praw);
+    if ($parent_id != 0) {
+        if (count(db::query($c, "SELECT id FROM categories WHERE id = ?", [$parent_id])) == 0) { $parent_id = 0; }
+    }
     if ($name != "" && string::regex_match($slug, "^[a-z0-9-]+$")) {
-        if (count(db::query($c, "SELECT id FROM categories WHERE slug = ?", [$slug])) == 0) { category_create($c, $name, $slug); }
+        if (count(db::query($c, "SELECT id FROM categories WHERE slug = ?", [$slug])) == 0) {
+            // Kendi kendinin üstü olamaz — yeni kayıtta id henüz yok, ama üst kategorinin
+            // slug'ı yeni slug ile aynıysa (aynı kaydı işaret ediyorsa) reddet.
+            $pslug = "";
+            if ($parent_id != 0) {
+                $prow = db::query($c, "SELECT slug FROM categories WHERE id = ?", [$parent_id]);
+                if (count($prow) > 0) { $pslug = $prow[0]["slug"]; }
+            }
+            if ($pslug != $slug) { category_create($c, $name, $slug, $parent_id); }
+        }
     }
     return response::redirect("/admin/categories");
 });
@@ -287,11 +312,23 @@ function xp_listing_filters($c, $type, $lang, $active) {
     $base = lang_prefix($lang) . "/product";
     $all = "chip"; if ($active == "") { $all = "chip active"; }
     $out = "<div class=\"cat-chips\"><a href=\"" . $base . "\" class=\"" . $all . "\">Tümü</a>";
-    foreach (category_all($c) as $cat) {
+    // Ağacı girintili çiplerle göster; bir üst kategori seçilince (aşağıdaki filtre)
+    // tüm alt ağacın ürünleri listelenir.
+    foreach (category_tree($c) as $cat) {
         $cls = "chip"; if ($active == $cat["slug"]) { $cls = "chip active"; }
-        $out = $out . "<a href=\"" . $base . "?category=" . $cat["slug"] . "\" class=\"" . $cls . "\">" . html::escape($cat["name"]) . "</a>";
+        $pfx = category_indent($cat["depth"], "— ");
+        $out = $out . "<a href=\"" . $base . "?category=" . $cat["slug"] . "\" class=\"" . $cls . "\">" . $pfx . html::escape($cat["name"]) . "</a>";
     }
     return $out . "</div>";
+}
+// Subtree-aware category filter (commerce override of the core seam). When a PARENT
+// product category is selected, its whole subtree (Giyim → Tişört …) is accepted;
+// leaf categories and every non-product type keep exact-match behaviour. This plugs
+// into render_listing via the xp_listing_category_match seam — no core function is
+// shadowed, so a future core change to the listing can't silently drift here.
+function xp_listing_category_match($c, $type, $cat) {
+    if ($type == "product") { return category_descendants($c, $cat); }
+    return [$cat];
 }
 // Homepage showcase: a "Featured products" grid (uses the core's generic card builder).
 function xp_home_sections($ctx) {
@@ -299,7 +336,7 @@ function xp_home_sections($ctx) {
     $lang = $ctx["lang"]; $pfx = $ctx["pfx"];
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC LIMIT 4", [$lang]);
     if (count($rows) == 0) { return ""; }
-    return "<div class=\"section-head\"><h2>Featured products</h2><a class=\"more\" href=\"" . $pfx . "/product\">All products &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $rows) . "</div>";
+    return "<div class=\"section-head\"><h2>Öne çıkan ürünler</h2><a class=\"more\" href=\"" . $pfx . "/product\">Tüm ürünler &rarr;</a></div><div class=\"cards\">" . cards_html($pfx . "/product", $rows) . "</div>";
 }
 // commerce manages the "product" content type in its OWN group, so the core's
 // "İçerik Yönetimi" list skips it.
@@ -310,17 +347,96 @@ function xp_permissions() {
 }
 
 // ── categories: a DOMAIN MODEL (real table + thin helpers, no query-builder) ───
-function category_all($c) { return db::query($c, "SELECT id, name, slug FROM categories ORDER BY name", []); }
-function category_create($c, $name, $slug) { db::exec($c, "INSERT INTO categories (name, slug) VALUES (?, ?)", [$name, $slug]); }
-function category_delete($c, $id) { db::exec($c, "DELETE FROM categories WHERE id = ?", [$id]); }
+// Kategoriler hiyerarşiktir: parent_id = 0 kök (üst kategori yok), aksi halde üst
+// kategorinin id'si. "Giyim > Tişört" gibi ağaçlar kurulur.
+function category_all($c) { return db::query($c, "SELECT id, name, slug, parent_id FROM categories ORDER BY name", []); }
+function category_create($c, $name, $slug, $parent_id) { db::exec($c, "INSERT INTO categories (name, slug, parent_id) VALUES (?, ?, ?)", [$name, $slug, $parent_id]); }
+function category_delete($c, $id) {
+    // Silinen kategorinin çocuklarını büyükanne/dede'ye (silinenin parent'ına) taşı —
+    // böylece yetim satır kalmaz ve ağaç bozulmaz. Tabloyu ASLA düşürmeyiz.
+    $rows = db::query($c, "SELECT parent_id FROM categories WHERE id = ?", [$id]);
+    $pid = 0;
+    if (count($rows) > 0) { $pid = type::to_int($rows[0]["parent_id"]); }
+    db::exec($c, "UPDATE categories SET parent_id = ? WHERE parent_id = ?", [$pid, $id]);
+    db::exec($c, "DELETE FROM categories WHERE id = ?", [$id]);
+}
+
+// İki-geçişli gruplama (derin özyineleme yerine güvenli): tüm satırları çek, parent_id'ye
+// göre grupla. Yetim satır (parent'ı silinmiş) kök gibi ele alınır → kaybolmaz.
+function category_group_by_parent($rows) {
+    // $ids / $by_parent string anahtarlı MAP'ler — liste [] olursa "2" gibi anahtar
+    // indekse çevrilip "out of bounds" verir; assoc map yaratmak şart.
+    $ids = array::new_assoc();
+    foreach ($rows as $r) { $ids["" . $r["id"]] = true; }
+    $by_parent = array::new_assoc();
+    foreach ($rows as $r) {
+        $pk = "" . $r["parent_id"];
+        // assoc map'te olmayan anahtar null döner (throw ETMEZ) → try/catch değil,
+        // açık null kontrolü şart.
+        $known = $ids[$pk];
+        if ($known == null) { $pk = "0"; }
+        $lst = $by_parent[$pk];
+        if ($lst == null) { $lst = []; }
+        $lst = array::push($lst, $r);
+        $by_parent[$pk] = $lst;
+    }
+    return $by_parent;
+}
+// Ağacı düz bir listeye açar: parent önce, sonra çocukları; her satıra "depth" eklenir.
+// $guard döngü/aşırı-derinlik koruması (bounded).
+function category_tree_walk($by_parent, $pk, $depth, $out, $guard) {
+    if ($guard > 64) { return $out; }
+    $kids = $by_parent[$pk];
+    if ($kids == null) { $kids = []; }
+    foreach ($kids as $r) {
+        $r["depth"] = $depth;
+        $out = array::push($out, $r);
+        $out = category_tree_walk($by_parent, "" . $r["id"], $depth + 1, $out, $guard + 1);
+    }
+    return $out;
+}
+function category_tree($c) {
+    $by_parent = category_group_by_parent(category_all($c));
+    $out = [];
+    return category_tree_walk($by_parent, "0", 0, $out, 0);
+}
+// Bir slug'ın kendisi + tüm alt (torun dahil) slug'ları. Storefront'ta bir üst kategori
+// seçilince tüm alt ağacın ürünlerini göstermek için kullanılır.
+function category_desc_walk($by_parent, $pk, $acc, $guard) {
+    if ($guard > 64) { return $acc; }
+    $kids = $by_parent[$pk];
+    if ($kids == null) { $kids = []; }
+    foreach ($kids as $r) {
+        $acc = array::push($acc, $r["slug"]);
+        $acc = category_desc_walk($by_parent, "" . $r["id"], $acc, $guard + 1);
+    }
+    return $acc;
+}
+function category_descendants($c, $slug) {
+    $rows = category_all($c);
+    $by_parent = category_group_by_parent($rows);
+    $start_id = 0;
+    foreach ($rows as $r) { if ($r["slug"] == $slug) { $start_id = $r["id"]; } }
+    $acc = [$slug];
+    if ($start_id == 0) { return $acc; }
+    return category_desc_walk($by_parent, "" . $start_id, $acc, 0);
+}
+// Derinliğe göre bir önek dizesi üretir (indent birimini yineleyerek).
+function category_indent($depth, $unit) {
+    $s = ""; $i = 0;
+    while ($i < $depth) { $s = $s . $unit; $i = $i + 1; }
+    return $s;
+}
 
 // Custom field type "category": a <select> of categories in the content editor.
 function xp_field_input($c, $f, $value) {
     if ($f["type"] != "category") { return ""; }
+    // Ağacı derinliğe göre "— " öneğiyle girintili göster ki hiyerarşi seçim kutusunda okunsun.
     $opts = "<option value=\"\">—</option>";
-    foreach (category_all($c) as $cat) {
+    foreach (category_tree($c) as $cat) {
         $sel = ""; if ($cat["slug"] == $value) { $sel = " selected"; }
-        $opts = $opts . "<option value=\"" . $cat["slug"] . "\"" . $sel . ">" . html::escape($cat["name"]) . "</option>";
+        $pfx = category_indent($cat["depth"], "— ");
+        $opts = $opts . "<option value=\"" . $cat["slug"] . "\"" . $sel . ">" . $pfx . html::escape($cat["name"]) . "</option>";
     }
     return "<label>" . $f["name"] . "<select name=\"" . $f["name"] . "\">" . $opts . "</select></label>";
 }

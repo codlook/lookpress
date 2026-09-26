@@ -29,6 +29,10 @@ function xp_field_input($c, $f, $value) { return ""; }
 // Filter UI above a public listing (commerce → category chips on /product).
 // $active is the current ?category= value. Return "" for no filters.
 function xp_listing_filters($c, $type, $lang, $active) { return ""; }
+// The set of category slugs a ?category=<cat> listing filter accepts. Default is an
+// exact match; an extension can widen it (e.g. commerce returns a parent category's
+// whole subtree for products) so render_listing needs no per-extension knowledge.
+function xp_listing_category_match($c, $type, $cat) { return [$cat]; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }

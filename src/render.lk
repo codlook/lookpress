@@ -137,13 +137,17 @@ function render_listing($c, $type, $lang) {
     $base = lang_prefix($lang) . string::replace($t["url_pattern"], "/{slug}", "");
     $rows = db::query($c, "SELECT c.slug, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = ? AND c.lang = ? AND c.published_rev > 0 ORDER BY c.updated_at DESC, c.id DESC", [$type, $lang]);
     // Optional ?category= filter (generic: matches a "category" field in the item).
+    // The set of accepted category slugs comes from a seam: the default is an exact
+    // match ([$cat]); an extension can widen it (commerce returns a parent's whole
+    // subtree for products) without shadowing this function.
     $cat = request::get("category"); if ($cat == null) { $cat = ""; }
     if ($cat != "") {
+        $allowed = xp_listing_category_match($c, $type, $cat);
         $keep = [];
         foreach ($rows as $r) {
             $v = json::decode($r["fields_json"]); $rc = "";
             if ($v != null) { try { $rc = $v["category"]; } catch ($e) { $rc = ""; } }
-            if ($rc == $cat) { $keep = array::push($keep, $r); }
+            if (array::contains($allowed, $rc)) { $keep = array::push($keep, $r); }
         }
         $rows = $keep;
     }

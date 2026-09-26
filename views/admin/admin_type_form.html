@@ -2,7 +2,7 @@
 {#block "content"}
 <h2>{$heading}</h2>
 {#each $errors as $e}<p class="error">{$e}</p>{/each}
-<form method="post" action="{$action}">
+<form method="post" action="{$action}" data-md-form>
 <label>Slug <input name="slug" value="{$slug}" required></label>
 {!$fields_html}
 <details class="seo-box"><summary>SEO (opsiyonel)</summary>
