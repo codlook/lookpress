@@ -115,7 +115,7 @@ verified on a fresh volume (`/en` canary 200, route count ≤ 70, 0 VM fallback)
 
 ### Wave 2 — communication, settings, components ✅ (shipped 2026-09-26, 69/70 routes)
 - ✅ **İletişim modülü**: submission status workflow (açık/işlemde/kapalı) + timestamped notes + delete on one route (`POST /admin/form/{key}`), status filters/counts, CSV export (BOM, RFC4180, formula-injection guard); demo forms iletisim / is-basvuru.
-- ✅ **Ayarlar**: sectioned (Genel / SEO / Tema / Dil / Sabit Alanlar) on the existing route; the theme prints them via `{$g.*}` (announcement bar, footer text/links/social/contact, og:image default, analytics head snippet) and `/robots.txt` appends `robots_extra`.
+- ✅ **Ayarlar**: sectioned (Genel / SEO / Tema / Dil / Sabit Alanlar) on the existing route; the theme prints them via `{$g.*}` (announcement bar, footer text/social/contact, og:image default, analytics head snippet) and `/robots.txt` appends `robots_extra`. **Footer links are a menu**, not a setting: Menü → *Footer bağlantıları* (`/admin/menu?loc=footer`, location `footer`); an old `sabit_footer_links` setting is migrated into it once.
 - ✅ **Components**: hero, slider (manual or module), columns (nested, depth ≤ 3), module listing, form embed, map (Google embed only), video (YouTube-nocookie/Vimeo), html (trusted admin) — editor cards + theme CSS + `docs/theme-components.md`.
 - ✅ **Dashboard**: module counters per group, İletişim / E-Ticaret / Üyeler panels, system summary, quick actions.
 - ✅ **Backups** (pulled from Wave 3): `scripts/backup.sh` / `restore.sh` (docker or Plesk; SQLite online backup via sidecar, MySQL/Postgres dumps), `docs/ops-backup.md`.
