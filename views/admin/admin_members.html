@@ -1,0 +1,28 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<div class="section-head"><h2>Üyeler <span class="muted">({$count})</span></h2></div>
+<form method="get" action="/admin/uyeler" class="list-filter">
+  <input type="search" name="q" value="{$q}" placeholder="E-posta veya ad ile ara…">
+  <button>Ara</button>
+</form>
+{#if $count == 0}<p class="muted">Üye yok.</p>{/if}
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>E-posta</th><th>Ad Soyad</th><th>Durum</th><th>Kayıt</th><th>Son giriş</th></tr></thead>
+<tbody>
+{#each $items as $m}<tr>
+<td class="muted">{$m.id}</td>
+<td><b>{$m.email}</b></td>
+<td>{$m.name}</td>
+<td>{#if $m.is_active}<span class="badge">aktif</span>{/if}{#if $m.is_inactive}<span class="muted">{$m.status}</span>{/if}</td>
+<td class="muted">{$m.created}</td>
+<td class="muted">{$m.last_login}</td>
+</tr>{/each}
+</tbody>
+</table></div>
+{#if $multi_page}<nav class="pager">
+{#if $has_prev}<a href="/admin/uyeler?q={$q}&page={$prev}">&larr; Önceki</a>{/if}
+<span class="muted">Sayfa {$page} / {$pages}</span>
+{#if $has_next}<a href="/admin/uyeler?q={$q}&page={$next}">Sonraki &rarr;</a>{/if}
+</nav>{/if}
+<p class="muted" style="font-size:13px;margin-top:14px">Üyeler mağaza müşterileridir; admin kullanıcılarından ayrı tutulur. Pasife alma/silme bir sonraki dalgada.</p>
+{/block}

@@ -1,0 +1,25 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<div class="section-head" style="margin-top:0"><h2>Hesabım</h2><a class="more" href="/hesap/siparisler">Siparişlerim &rarr;</a></div>
+<p class="muted">{$email} &middot; <a href="/hesap/cikis">Çıkış yap</a></p>
+{#if $has_error}<p class="error">{$error}</p>{/if}
+{#if $has_ok}<p class="sent-ok">{$ok}</p>{/if}
+
+<h3>Bilgilerim</h3>
+<form method="post" action="/hesap/profil" class="contact-form">
+{!$csrf}
+  <input type="hidden" name="op" value="name">
+  <label>Ad Soyad <input type="text" name="name" value="{$name}" required maxlength="120" autocomplete="name"></label>
+  <label>E-posta <input type="email" value="{$email}" disabled></label>
+  <button type="submit">Kaydet</button>
+</form>
+
+<h3>Şifre değiştir</h3>
+<form method="post" action="/hesap/profil" class="contact-form">
+{!$csrf}
+  <input type="hidden" name="op" value="password">
+  <label>Mevcut şifre <input type="password" name="current_password" required autocomplete="current-password"></label>
+  <label>Yeni şifre <span class="muted">(en az 8 karakter)</span> <input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
+  <button type="submit">Şifreyi değiştir</button>
+</form>
+{/block}

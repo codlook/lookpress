@@ -1,0 +1,13 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<h2>Kayıt ol</h2>
+{#if $has_error}<p class="error">{$error}</p>{/if}
+<form method="post" action="/hesap/kayit" class="contact-form">
+{!$csrf}
+  <label>Ad Soyad <input type="text" name="name" value="{$name}" required maxlength="120" autocomplete="name"></label>
+  <label>E-posta <input type="email" name="email" value="{$email}" required autocomplete="email"></label>
+  <label>Şifre <span class="muted">(en az 8 karakter)</span> <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+  <button type="submit">Kayıt ol</button>
+</form>
+<p class="muted">Zaten üye misiniz? <a href="/hesap/giris">Giriş yapın &rarr;</a></p>
+{/block}

@@ -1,0 +1,12 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<h2>Giriş yap</h2>
+{#if $has_error}<p class="error">{$error}</p>{/if}
+<form method="post" action="/hesap/giris" class="contact-form">
+{!$csrf}
+  <label>E-posta <input type="email" name="email" value="{$email}" required autocomplete="email"></label>
+  <label>Şifre <input type="password" name="password" required autocomplete="current-password"></label>
+  <button type="submit">Giriş yap</button>
+</form>
+<p class="muted">Hesabınız yok mu? <a href="/hesap/kayit">Kayıt olun &rarr;</a></p>
+{/block}

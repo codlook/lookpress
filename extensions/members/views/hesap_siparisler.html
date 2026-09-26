@@ -1,0 +1,18 @@
+{#extends "views/themes/default/layout"}
+{#block "content"}
+<div class="section-head" style="margin-top:0"><h2>Siparişlerim <span class="muted">({$count})</span></h2><a class="more" href="/hesap/profil">&larr; Hesabım</a></div>
+{#if $count == 0}<p class="muted">Henüz siparişiniz yok. <a href="/product">Mağazaya göz atın &rarr;</a></p>{/if}
+{#if $has_items}
+<table>
+<thead><tr><th>No</th><th>Tarih</th><th>Tutar</th><th>Durum</th></tr></thead>
+<tbody>
+{#each $items as $o}<tr>
+<td>#{$o.id}</td>
+<td>{$o.when}</td>
+<td>{$o.total} &#8378;</td>
+<td><span class="badge">{$o.status}</span></td>
+</tr>{/each}
+</tbody>
+</table>
+{/if}
+{/block}

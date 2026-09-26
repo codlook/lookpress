@@ -1,0 +1,226 @@
+// extensions/members/members.lk — site üyeleri (Üyeler). Admin `users` tablosundan
+// TAMAMEN AYRI bir `members` tablosu: kayıt / giriş / çıkış / profil / sipariş
+// geçmişi tek bir {action} çiftiyle (/hesap/{action} GET+POST) + salt-okunur admin
+// listesi (/admin/uyeler). Toplam 3 route — geri kalan her şey fonksiyon.
+//
+// Şema TEMBEL kurulur: xp_migrate kancası commerce'e ait (son tanım kazanır), o
+// yüzden members_init() her members route'unun başında CREATE TABLE IF NOT EXISTS
+// çalıştırır (idempotent, ucuz). Şifreler çekirdeğin auth:: (PBKDF2) fonksiyonlarıyla
+// — admin girişi ile aynı — hash'lenir; düz şifre asla loglanmaz/yazdırılmaz.
+// Oturum anahtarı "member_id" — adminin "uid" anahtarıyla çakışmaz.
+use db;
+use session;
+use string;
+use html;
+use type;
+use array;
+use date;
+use auth;
+
+// CSRF alanı: csrf_field() başka bir ajan tarafından ekleniyor; yoksa boş dize.
+function csrf_field_safe() { try { return csrf_field(); } catch ($e) { return ""; } }
+
+// ── şema (tembel, idempotent) ────────────────────────────────────────────────
+function members_init($c) {
+    db::exec($c, "CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(190) UNIQUE, password_hash TEXT, name VARCHAR(120), status VARCHAR(20) DEFAULT 'active', created_at INTEGER DEFAULT 0, last_login INTEGER DEFAULT 0)", []);
+}
+
+// ── oturum yardımcıları ──────────────────────────────────────────────────────
+// Giriş yapmış üyenin satırı (id, email, name, status) ya da null.
+function member_current($c) {
+    session::start();
+    $mid = session::get("member_id");
+    if ($mid == null) { return null; }
+    if ($mid == "") { return null; }
+    $rows = db::query($c, "SELECT id, email, name, status FROM members WHERE id = ?", [type::to_int($mid)]);
+    if (count($rows) == 0) { return null; }
+    if ($rows[0]["status"] != "active") { return null; }
+    return $rows[0];
+}
+// Giriş zorunlu sayfalar için: üye yoksa /hesap/giris'e yönlendirme yanıtı döner,
+// varsa null (çağıran "if ($r != null) return $r;" deseniyle kullanır).
+function member_require($c) {
+    if (member_current($c) == null) { return response::redirect("/hesap/giris"); }
+    return null;
+}
+function member_login_session($id) {
+    session::start(); session::regenerate();
+    session::set("member_id", "" . $id);
+}
+
+// ── doğrulama (İngilizce çalışma-zamanı metinleri) ───────────────────────────
+function member_norm_email($raw) {
+    if ($raw == null) { return ""; }
+    return string::lower(string::trim($raw));
+}
+function member_email_valid($email) {
+    if ($email == "") { return false; }
+    if (string::length($email) > 190) { return false; }
+    return string::regex_match($email, "^[^@ ]+@[^@ ]+\\.[^@ ]+$");
+}
+function member_password_valid($p) {
+    if ($p == null) { return false; }
+    return string::length($p) >= 8;
+}
+function member_email_taken($c, $email, $except_id) {
+    $rows = db::query($c, "SELECT id FROM members WHERE email = ? AND id != ?", [$email, $except_id]);
+    return count($rows) > 0;
+}
+function member_post($k) { $v = request::post($k); if ($v == null) { return ""; } return $v; }
+
+// ── görünüm yardımcıları ─────────────────────────────────────────────────────
+function member_view($tpl, $data) {
+    $data["csrf"] = csrf_field_safe();
+    return response::html(ext_view("members", $tpl, $data));
+}
+function member_form_giris($email, $error) {
+    return member_view("hesap_giris.html", ["page_title" => "Giriş", "email" => $email, "error" => $error, "has_error" => ($error != "")]);
+}
+function member_form_kayit($email, $name, $error) {
+    return member_view("hesap_kayit.html", ["page_title" => "Kayıt", "email" => $email, "name" => $name, "error" => $error, "has_error" => ($error != "")]);
+}
+function member_page_profil($m, $error, $ok) {
+    return member_view("hesap.html", ["page_title" => "Hesabım", "email" => $m["email"], "name" => $m["name"],
+        "error" => $error, "has_error" => ($error != ""), "ok" => $ok, "has_ok" => ($ok != "")]);
+}
+// Sipariş geçmişi: commerce `orders` tablosunda member_id sütunu YOK → eşleşme
+// üyenin e-postası üzerinden (orders.email = members.email). Salt-okunur; tablo
+// hiç yoksa (commerce yüklü değil) boş liste.
+function member_orders($c, $m) {
+    $rows = [];
+    try {
+        $rows = db::query($c, "SELECT id, total, status, created_at FROM orders WHERE email = ? ORDER BY id DESC LIMIT 100", [$m["email"]]);
+    } catch ($e) { $rows = []; }
+    $items = [];
+    foreach ($rows as $o) {
+        $ts = type::to_int($o["created_at"]);
+        $when = ""; if ($ts > 0) { $when = date::format($ts, "d.m.Y H:i"); }
+        $items = array::push($items, ["id" => $o["id"], "total" => $o["total"], "status" => $o["status"], "when" => $when]);
+    }
+    return $items;
+}
+
+// ── /hesap/{action} GET ──────────────────────────────────────────────────────
+route("GET", "/hesap/{action}", function() {
+    $c = conn();
+    members_init($c);
+    $action = request::param("action");
+    if ($action == "cikis") {
+        session::start(); session::set("member_id", ""); session::regenerate();
+        return response::redirect("/");
+    }
+    if ($action == "giris") {
+        if (member_current($c) != null) { return response::redirect("/hesap/profil"); }
+        return member_form_giris("", "");
+    }
+    if ($action == "kayit") {
+        if (member_current($c) != null) { return response::redirect("/hesap/profil"); }
+        return member_form_kayit("", "", "");
+    }
+    if ($action == "profil") {
+        $r = member_require($c); if ($r != null) { return $r; }
+        return member_page_profil(member_current($c), "", "");
+    }
+    if ($action == "siparisler") {
+        $r = member_require($c); if ($r != null) { return $r; }
+        $m = member_current($c);
+        $items = member_orders($c, $m);
+        return member_view("hesap_siparisler.html", ["page_title" => "Siparişlerim", "items" => $items, "count" => count($items), "has_items" => (count($items) > 0)]);
+    }
+    return response::status(404, view("notfound.html", []));
+});
+
+// ── /hesap/{action} POST ─────────────────────────────────────────────────────
+route("POST", "/hesap/{action}", function() {
+    $c = conn();
+    members_init($c);
+    $action = request::param("action");
+    if ($action == "kayit") {
+        $email = member_norm_email(request::post("email"));
+        $name = string::trim(member_post("name"));
+        $p = member_post("password");
+        if (!member_email_valid($email)) { return member_form_kayit($email, $name, "Please enter a valid email address."); }
+        if ($name == "" || string::length($name) > 120) { return member_form_kayit($email, $name, "Name is required (max 120 characters)."); }
+        if (!member_password_valid($p)) { return member_form_kayit($email, $name, "Password must be at least 8 characters."); }
+        if (member_email_taken($c, $email, 0)) { return member_form_kayit($email, $name, "This email is already registered."); }
+        $ts = date::timestamp();
+        db::exec($c, "INSERT INTO members (email, password_hash, name, status, created_at, last_login) VALUES (?, ?, ?, 'active', ?, ?)", [$email, auth::hash($p), $name, $ts, $ts]);
+        member_login_session(db::last_id($c));
+        return response::redirect("/hesap/profil");
+    }
+    if ($action == "giris") {
+        $email = member_norm_email(request::post("email"));
+        $p = member_post("password");
+        if ($email != "" && $p != "") {
+            $rows = db::query($c, "SELECT id, password_hash, status FROM members WHERE email = ?", [$email]);
+            if (count($rows) == 1) {
+                if ($rows[0]["status"] == "active") {
+                    if (auth::verify($p, $rows[0]["password_hash"])) {
+                        db::exec($c, "UPDATE members SET last_login = ? WHERE id = ?", [date::timestamp(), $rows[0]["id"]]);
+                        member_login_session($rows[0]["id"]);
+                        return response::redirect("/hesap/profil");
+                    }
+                }
+            }
+        }
+        // Tek genel mesaj: e-posta var/yok bilgisini sızdırma.
+        return member_form_giris($email, "Invalid email or password.");
+    }
+    if ($action == "profil") {
+        $r = member_require($c); if ($r != null) { return $r; }
+        $m = member_current($c);
+        $op = member_post("op");
+        if ($op == "name") {
+            $name = string::trim(member_post("name"));
+            if ($name == "" || string::length($name) > 120) { return member_page_profil($m, "Name is required (max 120 characters).", ""); }
+            db::exec($c, "UPDATE members SET name = ? WHERE id = ?", [$name, $m["id"]]);
+            return member_page_profil(member_current($c), "", "Bilgileriniz güncellendi.");
+        }
+        if ($op == "password") {
+            $cur = member_post("current_password");
+            $new = member_post("new_password");
+            $rows = db::query($c, "SELECT password_hash FROM members WHERE id = ?", [$m["id"]]);
+            if (count($rows) != 1) { return member_page_profil($m, "Account not found.", ""); }
+            if (!auth::verify($cur, $rows[0]["password_hash"])) { return member_page_profil($m, "Current password is incorrect.", ""); }
+            if (!member_password_valid($new)) { return member_page_profil($m, "New password must be at least 8 characters.", ""); }
+            db::exec($c, "UPDATE members SET password_hash = ? WHERE id = ?", [auth::hash($new), $m["id"]]);
+            return member_page_profil($m, "", "Şifreniz değiştirildi.");
+        }
+        return member_page_profil($m, "Unknown operation.", "");
+    }
+    return response::status(404, "Unknown action.");
+});
+
+// ── /admin/uyeler — salt-okunur üye listesi (arama + sayfalama) ─────────────
+// Pasife alma / silme Wave-2 (ek route bütçesi gerektirir); şimdilik durum rozeti.
+route("GET", "/admin/uyeler", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("users")) { return response::status(403, "Yetkiniz yok."); }
+    $c = conn();
+    members_init($c);
+    $q = request::get("q"); if ($q == null) { $q = ""; } $q = string::trim($q);
+    $per = 20;
+    $praw = request::get("page"); if ($praw == null) { $praw = "1"; }
+    $page = type::to_int($praw); if ($page < 1) { $page = 1; }
+    $where = "1 = 1"; $params = [];
+    if ($q != "") { $where = "(email LIKE ? OR name LIKE ?)"; $params = ["%" . $q . "%", "%" . $q . "%"]; }
+    $total = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM members WHERE " . $where, $params)[0]["n"]);
+    $pages = type::to_int(($total + $per - 1) / $per); if ($pages < 1) { $pages = 1; }
+    if ($page > $pages) { $page = $pages; }
+    $offset = ($page - 1) * $per;
+    $qp = $params; $qp = array::push($qp, $per); $qp = array::push($qp, $offset);
+    $rows = db::query($c, "SELECT id, email, name, status, created_at, last_login FROM members WHERE " . $where . " ORDER BY id DESC LIMIT ? OFFSET ?", $qp);
+    $items = [];
+    foreach ($rows as $m) {
+        $cr = type::to_int($m["created_at"]); $created = ""; if ($cr > 0) { $created = date::format($cr, "d.m.Y"); }
+        $ll = type::to_int($m["last_login"]); $last = "—"; if ($ll > 0) { $last = date::format($ll, "d.m.Y H:i"); }
+        $nm = $m["name"]; if ($nm == null) { $nm = ""; }
+        $items = array::push($items, ["id" => $m["id"], "email" => $m["email"], "name" => $nm, "status" => $m["status"],
+            "is_active" => ($m["status"] == "active"), "is_inactive" => ($m["status"] != "active"), "created" => $created, "last_login" => $last]);
+    }
+    return response::html(admin_view("admin_members.html", [
+        "items" => $items, "count" => $total, "q" => $q,
+        "page" => $page, "pages" => $pages, "prev" => $page - 1, "next" => $page + 1,
+        "has_prev" => ($page > 1), "has_next" => ($page < $pages), "multi_page" => ($pages > 1)
+    ]));
+});
