@@ -146,7 +146,14 @@ function security_headers() {
 // Açık demo kilidi: LOOKPRESS_LOCK_USERS=1 iken kullanıcı ve rol yönetimi salt-okunur
 // (şifre/rol değişimi, kullanıcı ekleme/silme, rol düzenleme kapalı). Herkese açık bir
 // demo hesabının şifresini kimse değiştiremesin diye.
+// LOOKPRESS_LOCK_HTML=1: ham HTML girişleri kapalı (html bloğu, analytics_head,
+// robots_extra, WordPress içe aktarma). Süper yönetici dahil — hesap herkese açıkken
+// ziyaretçilerin tarayıcısında çalışacak script yazılamasın.
+function raw_html_locked() {
+    return env("LOOKPRESS_LOCK_HTML", "0") == "1";
+}
 function users_locked($path) {
+    if (raw_html_locked() && $path == "/admin/import") { return true; }
     if (env("LOOKPRESS_LOCK_USERS", "0") != "1") { return false; }
     if (string::starts_with($path, "/admin/users")) { return true; }
     if (string::starts_with($path, "/admin/roles")) { return true; }
@@ -157,7 +164,7 @@ before_route(function() {
     if (request::method() != "POST") { return; }
     if (users_locked(request::path())) {
         response::status(403);
-        response::text("Demo: user and role management is locked on this site.");
+        response::text("Demo: this action is locked on this site.");
         stop();
     }
     if (!csrf_required(request::path())) { return; }
