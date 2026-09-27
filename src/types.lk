@@ -420,7 +420,7 @@ function validate_post($c, $fields) {
             if ($t == "blocks" && $raw != "") {
                 $barr = json::decode($raw);
                 if (!type::is_array($barr)) { $errors = array::push($errors, $name . " must be a JSON array"); }
-                else { if ((!can("html") || raw_html_locked()) && blocks_has_html($barr, 0)) { $errors = array::push($errors, $name . ": the raw HTML block requires the 'html' permission"); } }
+                else { if (!can("html") && blocks_has_html($barr, 0)) { $errors = array::push($errors, $name . ": the raw HTML block requires the 'html' permission"); } }
             }
             if (($t == "gallery" || $t == "repeater") && $raw != "") {
                 $arr = json::decode($raw);

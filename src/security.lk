@@ -143,33 +143,18 @@ function security_headers() {
 }
 
 // ── middleware: her istekte başlıklar; kapsamlı POST'larda CSRF ───────────────
-// Açık demo kilidi: LOOKPRESS_LOCK_USERS=1 iken kullanıcı ve rol yönetimi salt-okunur
-// (şifre/rol değişimi, kullanıcı ekleme/silme, rol düzenleme kapalı). Herkese açık bir
-// demo hesabının şifresini kimse değiştiremesin diye.
-// LOOKPRESS_LOCK_HTML=1: ham HTML girişleri kapalı (html bloğu, analytics_head,
-// robots_extra, WordPress içe aktarma). Süper yönetici dahil — hesap herkese açıkken
-// ziyaretçilerin tarayıcısında çalışacak script yazılamasın.
-function raw_html_locked() {
-    return env("LOOKPRESS_LOCK_HTML", "0") == "1";
-}
-function users_locked($path) {
-    // LOOKPRESS_LOCK_PASSWORD=1: yalnız admin kullanıcılarının şifre değişimi kapalı
-    // (herkese açık demo hesabının şifresi sabit kalsın); başka hiçbir şeyi kısıtlamaz.
-    if (env("LOOKPRESS_LOCK_PASSWORD", "0") == "1") {
-        if (string::starts_with($path, "/admin/users/") && string::ends_with($path, "/password")) { return true; }
-    }
-    if (raw_html_locked() && $path == "/admin/import") { return true; }
-    if (env("LOOKPRESS_LOCK_USERS", "0") != "1") { return false; }
-    if (string::starts_with($path, "/admin/users")) { return true; }
-    if (string::starts_with($path, "/admin/roles")) { return true; }
-    return false;
+// LOOKPRESS_LOCK_PASSWORD=1: yalnız admin kullanıcılarının şifre değişimi kapalı
+// (herkese açık demo hesabının şifresi sabit kalsın). Başka hiçbir şeyi kısıtlamaz.
+function password_locked($path) {
+    if (env("LOOKPRESS_LOCK_PASSWORD", "0") != "1") { return false; }
+    return string::starts_with($path, "/admin/users/") && string::ends_with($path, "/password");
 }
 before_route(function() {
     security_headers();
     if (request::method() != "POST") { return; }
-    if (users_locked(request::path())) {
+    if (password_locked(request::path())) {
         response::status(403);
-        response::text("Demo: this action is locked on this site.");
+        response::text("Demo: the password of this account cannot be changed.");
         stop();
     }
     if (!csrf_required(request::path())) { return; }

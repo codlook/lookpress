@@ -906,8 +906,6 @@ route("POST", "/admin/settings", function() {
     // Wave 2 bölümleri — tek form, tüm alanlar her kayıtta gelir (sekmeler CSS/JS ile).
     // analytics_head / robots_extra HAM saklanır (yalnız güvenilir admin; şablon {!} basar).
     foreach (settings_text_keys() as $k) {
-        // Açık demo: ham HTML/robots alanları değiştirilemez (mevcut değer korunur).
-        if (raw_html_locked() && ($k == "analytics_head" || $k == "robots_extra")) { continue; }
         $v = request::post($k); if ($v == null) { $v = ""; }
         setting_set($c, $k, string::trim($v));
     }
