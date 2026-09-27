@@ -153,6 +153,11 @@ function raw_html_locked() {
     return env("LOOKPRESS_LOCK_HTML", "0") == "1";
 }
 function users_locked($path) {
+    // LOOKPRESS_LOCK_PASSWORD=1: yalnız admin kullanıcılarının şifre değişimi kapalı
+    // (herkese açık demo hesabının şifresi sabit kalsın); başka hiçbir şeyi kısıtlamaz.
+    if (env("LOOKPRESS_LOCK_PASSWORD", "0") == "1") {
+        if (string::starts_with($path, "/admin/users/") && string::ends_with($path, "/password")) { return true; }
+    }
     if (raw_html_locked() && $path == "/admin/import") { return true; }
     if (env("LOOKPRESS_LOCK_USERS", "0") != "1") { return false; }
     if (string::starts_with($path, "/admin/users")) { return true; }
