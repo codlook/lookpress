@@ -63,6 +63,7 @@ function content_fields($c, $type, $fields_json) {
             else { if ($ft == "email") { $kind = "email"; }
             else { if ($ft == "tel") { $kind = "tel"; } } }
         }
+        if ($kind == "url" || $kind == "image") { $v = safe_url($v); if ($v == "") { continue; } }
         $out = array::push($out, ["name" => $name, "value" => $v, "kind" => $kind]);
     }
     return $out;
@@ -81,7 +82,28 @@ function block_val($d, $k) {
 }
 function render_one_block($t, $d) { return render_block_at($t, $d, 0); }
 // $depth: iç içe geçme seviyesi (columns → nested blocks). 3'ten derine inilmez.
+// URL taşıyan blok anahtarları şema izin-listesinden geçer (audit LP-03/LP-15):
+// javascript:/data: gibi şemalar "" olur. Blok tipinden bağımsız, tek noktada.
+function block_safe_urls($d) {
+    if ($d == null || !type::is_array($d)) { return array::new_assoc(); }
+    $keys = ["url", "image", "button_url", "link", "embed_url"];
+    foreach ($keys as $k) {
+        $v = $d[$k];
+        if ($v != null) { $d[$k] = safe_url("" . $v); }
+    }
+    $imgs = $d["images"];
+    if ($imgs != null && type::is_array($imgs)) {
+        $clean = [];
+        foreach ($imgs as $u) {
+            $su = safe_url("" . $u);
+            if ($su != "") { $clean = array::push($clean, $su); }
+        }
+        $d["images"] = $clean;
+    }
+    return $d;
+}
 function render_block_at($t, $d, $depth) {
+    $d = block_safe_urls($d);
     if ($d == null || !type::is_array($d)) { $d = array::new_assoc(); }
     if ($t == "heading") {
         $tag = "h2"; if (block_val($d, "level") == "3") { $tag = "h3"; }
@@ -181,8 +203,8 @@ function block_slide_html($image, $title, $subtitle, $link, $idx) {
     $cls = "slide"; if ($idx == 0) { $cls = "slide is-active"; }
     $hidden = "true"; if ($idx == 0) { $hidden = "false"; }
     $h = "<div class=\"" . $cls . "\" role=\"group\" aria-roledescription=\"slide\" aria-hidden=\"" . $hidden . "\">";
-    if ($link != "") { $h = $h . "<a class=\"slide-link\" href=\"" . html::escape($link) . "\">"; }
-    if ($image != "") { $h = $h . "<img src=\"" . html::escape($image) . "\" alt=\"" . html::escape($title) . "\" loading=\"lazy\">"; }
+    if ($link != "") { $h = $h . "<a class=\"slide-link\" href=\"" . html::escape(safe_url($link)) . "\">"; }
+    if ($image != "") { $h = $h . "<img src=\"" . html::escape(safe_url($image)) . "\" alt=\"" . html::escape($title) . "\" loading=\"lazy\">"; }
     if ($title != "" || $subtitle != "") {
         $h = $h . "<div class=\"slide-cap\">";
         if ($title != "") { $h = $h . "<h3>" . html::escape($title) . "</h3>"; }
@@ -541,6 +563,7 @@ function cards_html($base, $rows) {
             try { $price = $vals["price"]; } catch ($e) { $price = ""; }
         }
         if ($img == null) { $img = ""; }
+        $img = safe_url($img);
         if ($price == null) { $price = ""; }
         $imgh = "";
         if ($img != "") { $imgh = "<span class=\"card-img\"><img src=\"" . html::escape($img) . "\" alt=\"\" onerror=\"this.style.display='none'\"></span>"; }
@@ -562,6 +585,7 @@ function card_items($base, $rows) {
             try { $price = $vals["price"]; } catch ($e) { $price = ""; }
         }
         if ($img == null) { $img = ""; }
+        $img = safe_url($img);
         if ($price == null) { $price = ""; }
         $items = array::push($items, [
             "url" => $base . "/" . $it["slug"], "title" => $it["title"],

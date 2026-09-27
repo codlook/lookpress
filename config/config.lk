@@ -38,6 +38,7 @@ function cfg_permissions() {
         ["key" => "forms",    "label" => "Form gönderimleri"],
         ["key" => "users",    "label" => "Kullanıcı yönetimi"],
         ["key" => "roles",    "label" => "Rol & yetki yönetimi"],
-        ["key" => "settings", "label" => "Ayarlar"]
+        ["key" => "settings", "label" => "Ayarlar"],
+        ["key" => "html",     "label" => "Ham HTML bloğu (güvenilir)"]
     ];
 }

@@ -33,6 +33,9 @@ function xp_listing_filters($c, $type, $lang, $active) { return ""; }
 // exact match; an extension can widen it (e.g. commerce returns a parent category's
 // whole subtree for products) so render_listing needs no per-extension knowledge.
 function xp_listing_category_match($c, $type, $cat) { return [$cat]; }
+// The permission key required to manage a module in the admin. Default "content";
+// an extension returns its own key for the modules it owns (commerce → "products").
+function xp_type_permission($slug) { return "content"; }
 // Admin dashboard: extra stat tiles and panels.
 function xp_dashboard_stats($ctx) { return ""; }
 function xp_dashboard_panels($ctx) { return ""; }

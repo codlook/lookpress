@@ -569,6 +569,12 @@ function xp_home_sections($ctx) {
 // commerce manages the "product" content type in its OWN group, so the core's
 // "İçerik Yönetimi" list skips it.
 function xp_hidden_types() { return ["product"]; }
+// commerce modülleri kendi yetkisiyle yönetilir (audit LP-01): "content" yetkisi
+// ürün/markaları düzenlemeye yetmez.
+function xp_type_permission($slug) {
+    if ($slug == "product" || $slug == "marka") { return "products"; }
+    return "content";
+}
 // commerce contributes its permissions to the RBAC catalog.
 function xp_permissions() {
     return [["key" => "products", "label" => "Ürünler & kategoriler"], ["key" => "orders", "label" => "Siparişler"], ["key" => "coupons", "label" => "Kuponlar"]];

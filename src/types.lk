@@ -345,6 +345,43 @@ function fields_form_html($c, $fields, $values) {
 }
 
 // Server-side validation — form HTML is NOT security. Returns [errors[], values{}].
+// ── yetki + sahiplik yardımcıları (audit LP-01) ─────────────────────────────
+// Bir modülü yönetmek için gereken yetki: varsayılan "content"; bir extension kendi
+// modülleri için başka bir yetki isteyebilir (xp_type_permission — commerce → products).
+function can_type($type) {
+    if ($type == null) { return can("content"); }
+    return can(xp_type_permission("" . $type));
+}
+// İçerik satırı gerçekten bu modüle mi ait? {type} yol parçası yalnız şema/redirect
+// için kullanılıyordu; satır sorguları type ile kısıtlanmadığından başka modülün
+// kaydı silinebiliyor/düzenlenebiliyordu.
+function content_in_type($c, $id, $type) {
+    if ($id == null || $type == null) { return false; }
+    return count(db::query($c, "SELECT id FROM content WHERE id = ? AND type = ?", [$id, $type])) == 1;
+}
+// Blok listesinde (iç içe sütunlar dahil) ham "html" bloğu var mı? (audit LP-03)
+function blocks_has_html($arr, $depth) {
+    if ($depth > 6) { return false; }
+    if ($arr == null || !type::is_array($arr)) { return false; }
+    foreach ($arr as $b) {
+        if ($b == null || !type::is_array($b)) { continue; }
+        $bt = $b["type"];
+        if ($bt != null && string::lower(string::trim("" . $bt)) == "html") { return true; }
+        $bd = $b["data"];
+        if ($bd != null && type::is_array($bd)) {
+            $cols = $bd["cols"];
+            if ($cols != null && type::is_array($cols)) {
+                foreach ($cols as $col) {
+                    if ($col == null || !type::is_array($col)) { continue; }
+                    $nb = $col["blocks"];
+                    if ($nb != null && !type::is_array($nb)) { $nb = json::decode("" . $nb); }
+                    if (blocks_has_html($nb, $depth + 1)) { return true; }
+                }
+            }
+        }
+    }
+    return false;
+}
 function validate_post($c, $fields) {
     $errors = [];
     $values = [];
@@ -379,6 +416,11 @@ function validate_post($c, $fields) {
                     try { if ($f["max"] != null && $f["max"] != "") { $has_max = true; $maxv = type::to_float($f["max"]); } } catch ($e) { $has_max = false; }
                     if ($has_max && $nv > $maxv) { $errors = array::push($errors, $name . " must be <= " . $f["max"]); }
                 }
+            }
+            if ($t == "blocks" && $raw != "") {
+                $barr = json::decode($raw);
+                if (!type::is_array($barr)) { $errors = array::push($errors, $name . " must be a JSON array"); }
+                else { if (!can("html") && blocks_has_html($barr, 0)) { $errors = array::push($errors, $name . ": the raw HTML block requires the 'html' permission"); } }
             }
             if (($t == "gallery" || $t == "repeater") && $raw != "") {
                 $arr = json::decode($raw);

@@ -21,6 +21,9 @@ services:
       - LOOK_BYTECODE=0
       - LOOK_SESSION_SECURE=0 # plain-HTTP dev; set 1 (or use a TLS proxy) in prod
       - LOOKPRESS_SEED=1       # seed demo content on first run
+      # Demo preset: kurumsal (default) | haber | eticaret — see docs/presets.md.
+      # Overridable from the shell: LOOKPRESS_PRESET=haber docker compose up (fresh volume).
+      - LOOKPRESS_PRESET=${LOOKPRESS_PRESET:-kurumsal}
       # Admin password. Explicit dev value here (NOT a hidden code default) —
       # override it: copy .env.example to .env and set ADMIN_PASSWORD, or export it.
       # Unset => /admin login is disabled (fail-loud), never a "changeme" backdoor.

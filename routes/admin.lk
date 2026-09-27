@@ -169,7 +169,7 @@ route("POST", "/admin/types/new", function() {
 // ── GENERIC admin CRUD — ONE handler set for EVERY type (the type engine) ────
 route("GET", "/admin/type/{type}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
@@ -225,7 +225,7 @@ route("GET", "/admin/type/{type}", function() {
 
 route("GET", "/admin/type/{type}/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
@@ -234,7 +234,7 @@ route("GET", "/admin/type/{type}/new", function() {
 });
 route("POST", "/admin/type/{type}/new", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
@@ -254,11 +254,11 @@ route("POST", "/admin/type/{type}/new", function() {
 
 route("GET", "/admin/type/{type}/edit/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
-    $rows = db::query($c, "SELECT c.slug, c.status, c.lang, c.publish_at, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    $rows = db::query($c, "SELECT c.slug, c.status, c.lang, c.publish_at, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ? AND c.type = ?", [request::param("id"), $t["slug"]]);
     if (count($rows) == 0) { return response::status(404, "No such item"); }
     $vals = json::decode($rows[0]["fields_json"]);
     $form = fields_form_html($c, $t["fields"], $vals);
@@ -269,7 +269,7 @@ route("GET", "/admin/type/{type}/edit/{id}", function() {
 });
 route("POST", "/admin/type/{type}/edit/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $t = load_type($c, request::param("type"));
     if ($t == null) { return response::status(404, "No such type"); }
@@ -282,6 +282,7 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
         $form = fields_form_html($c, $t["fields"], $v["values"]);
         return response::html(admin_view("admin_type_form.html", ["type" => $t, "action" => "/admin/type/" . $t["slug"] . "/edit/" . request::param("id"), "content_id" => request::param("id"), "heading" => "Edit " . $t["label"], "fields_html" => $form, "slug" => $slug, "status" => request::post("status"), "lang" => $lang, "seo_title" => request::post("seo_title"), "seo_desc" => request::post("seo_desc"), "schedule" => request::post("publish_at"), "errors" => $errs]));
     }
+    if (!content_in_type($c, request::param("id"), $t["slug"])) { return response::status(404, "No such item"); }
     save_content($c, $t["slug"], type::to_int(request::param("id")), $slug, with_seo($v["values"]), request::post("status"), $lang);
     return response::redirect("/admin/type/" . $t["slug"]);
 });
@@ -292,11 +293,16 @@ route("POST", "/admin/type/{type}/edit/{id}", function() {
 // Folded into one handler to keep the top-level route budget small (see users note).
 route("POST", "/admin/type/{type}/{action}/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $action = request::param("action");
     $id = request::param("id");
     $type = request::param("type");
+    // audit LP-01/LP-04: {type} gerçek bir modül olmalı, çağıranın o modül için yetkisi
+    // olmalı ve kayıt o modüle ait olmalı (tipler-arası silme/düzenleme + yansıyan XSS).
+    if (load_type($c, $type) == null) { return response::status(404, "No such type"); }
+    if (!can_type($type)) { return response::status(403, "Yetkiniz yok."); }
+    if (!content_in_type($c, $id, $type)) { return response::status(404, "No such item"); }
     if ($action == "delete") {
         db::exec($c, "DELETE FROM revisions WHERE content_id = ?", [$id]);
         db::exec($c, "DELETE FROM content WHERE id = ?", [$id]);
@@ -341,10 +347,15 @@ route("POST", "/admin/type/{type}/{action}/{id}", function() {
 // ── revision history + rollback (versioned core: rollback = a pointer move) ───
 route("GET", "/admin/type/{type}/history/{id}", function() {
     if (!is_admin()) { return response::redirect("/admin/login"); }
-    if (!can("content")) { return response::status(403, "Yetkiniz yok."); }
+    if (!can_type(request::param("type"))) { return response::status(403, "Yetkiniz yok."); }
     $c = conn();
     $id = request::param("id");
     $type = request::param("type");
+    // audit LP-01/LP-04: {type} gerçek bir modül olmalı, çağıranın o modül için yetkisi
+    // olmalı ve kayıt o modüle ait olmalı (tipler-arası silme/düzenleme + yansıyan XSS).
+    if (load_type($c, $type) == null) { return response::status(404, "No such type"); }
+    if (!can_type($type)) { return response::status(403, "Yetkiniz yok."); }
+    if (!content_in_type($c, $id, $type)) { return response::status(404, "No such item"); }
     $cont = db::query($c, "SELECT current_rev, slug FROM content WHERE id = ?", [$id]);
     if (count($cont) == 0) { return response::status(404, view("notfound.html", [])); }
     $cur = type::to_int($cont[0]["current_rev"]);
@@ -396,7 +407,8 @@ route("GET", "/api/{type}", function() {
 route("GET", "/preview/{id}", function() {
     if (!is_admin()) { return response::status(403, "admin only"); }
     $c = conn();
-    $rows = db::query($c, "SELECT r.title, r.body_html FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    $rows = db::query($c, "SELECT r.title, r.body_html, c.type FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [request::param("id")]);
+    if (count($rows) == 1 && !can_type($rows[0]["type"])) { return response::status(403, "Yetkiniz yok."); }
     if (count($rows) == 0) { return response::status(404, view("notfound.html", [])); }
     return response::html(view("page.html", ["title" => $rows[0]["title"], "content" => $rows[0]["body_html"], "fields" => [], "has_fields" => false, "extra" => ""]));
 });
@@ -656,6 +668,8 @@ route("POST", "/admin/users/{id}/{action}", function() {
         if (count(db::query($c, "SELECT id FROM roles WHERE name = ?", [$role])) == 0) { return response::redirect("/admin/users"); }
         $cur = db::query($c, "SELECT role FROM users WHERE id = ?", [$id]);
         if (count($cur) == 1) {
+            // audit LP-02: admin rolünü vermek/almak yalnız süper kullanıcıya açık.
+            if (($role == "admin" || $cur[0]["role"] == "admin") && !is_super()) { return response::status(403, "Yetkiniz yok."); }
             if ($cur[0]["role"] == "admin" && $role != "admin" && admin_count($c) <= 1) {
                 return response::status(400, "Son admin rolü düşürülemez (kilitlenme koruması).");
             }
@@ -665,6 +679,9 @@ route("POST", "/admin/users/{id}/{action}", function() {
     }
     if ($action == "password") {
         $p = request::post("password");
+        // audit LP-02: admin rolündeki bir hesabın şifresini yalnız süper kullanıcı sıfırlar.
+        $tr = db::query($c, "SELECT role FROM users WHERE id = ?", [$id]);
+        if (count($tr) == 1 && $tr[0]["role"] == "admin" && !is_super()) { return response::status(403, "Yetkiniz yok."); }
         if ($p != null && $p != "") {
             db::exec($c, "UPDATE users SET password_hash = ? WHERE id = ?", [auth::hash($p), $id]);
         }
@@ -674,6 +691,7 @@ route("POST", "/admin/users/{id}/{action}", function() {
         if ($id == $me) { return response::status(400, "Kendinizi silemezsiniz."); }
         $cur = db::query($c, "SELECT role FROM users WHERE id = ?", [$id]);
         if (count($cur) == 1) {
+            if ($cur[0]["role"] == "admin" && !is_super()) { return response::status(403, "Yetkiniz yok."); }
             if ($cur[0]["role"] == "admin" && admin_count($c) <= 1) {
                 return response::status(400, "Son admin silinemez (kilitlenme koruması).");
             }
@@ -692,6 +710,7 @@ route("POST", "/admin/users/new", function() {
     $role = request::post("role");
     // role must be a real role; default to editor
     if (count(db::query($c, "SELECT id FROM roles WHERE name = ?", [$role])) == 0) { $role = "editor"; }
+    if ($role == "admin" && !is_super()) { return response::status(403, "Yetkiniz yok."); }
     if ($u != "") {
         if ($p != null) {
             if ($p != "") {
@@ -751,6 +770,9 @@ route("POST", "/admin/roles/{id}/{action}", function() {
     $action = request::param("action");
     if ($action == "save") {
         $r = db::query($c, "SELECT name FROM roles WHERE id = ?", [$id]);
+        // audit LP-02: kişi kendi rolünün yetkilerini genişletemez (süper hariç).
+        session::start();
+        if (count($r) == 1 && $r[0]["name"] == session::get("role") && !is_super()) { return response::status(403, "Yetkiniz yok."); }
         if (count($r) == 1 && $r[0]["name"] != "admin") {
             db::exec($c, "UPDATE roles SET perms = ? WHERE id = ?", [json::encode(collect_perms()), $id]);
         }
