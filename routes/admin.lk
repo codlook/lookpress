@@ -964,8 +964,15 @@ route("POST", "/admin/import", function() {
         return import_fail($d, "Dosya seçilmedi.");
     }
     if ($f["size"] > 26214400) { return import_fail($d, "Dosya 25 MB sınırını aşıyor."); }
-    $xml = "";
-    try { $xml = file::read($f["path"]); } catch ($e) { $xml = ""; }
+    // file:: çalışma dizinine kısıtlıdır; upload'ın geçici yolu onun dışında kalır ve
+    // doğrudan okunamaz. Dosya önce depoya alınır (file::store → kök içinde), okunur,
+    // sonra silinir — hiçbir yere servis edilmez.
+    $xml = ""; $stored = null;
+    try { $stored = file::store($f, "import"); } catch ($e) { $stored = null; }
+    if ($stored != null) {
+        try { $xml = file::read($stored["path"]); } catch ($e) { $xml = ""; }
+        try { file::remove($stored["path"]); } catch ($e) { $xml = $xml; }
+    }
     if ($xml == "") { return import_fail($d, "Yüklenen dosya okunamadı."); }
     if (!string::contains($xml, "<rss") || !string::contains($xml, "<channel") || !string::contains($xml, "<item>")) {
         return import_fail($d, "Bu dosya bir WordPress dışa aktarım (WXR) dosyası gibi görünmüyor.");
