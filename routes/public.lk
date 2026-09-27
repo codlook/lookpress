@@ -34,21 +34,28 @@ route("GET", "/media/{name}", function() {
     return;
 });
 
-// ── search (SQL LIKE across published content; FTS5 is the measured next step) ─
+// ── search (src/search.lk: FTS5 when the SQLite build has it, LIKE otherwise) ──
+// Dil: ?lang=en ya da /en yolu → "en", aksi hâlde "tr". 2 karakterden kısa sorgu
+// sorgulanmaz; şablon dostça uyarı basar.
 route("GET", "/search", function() {
     $c = conn();
-    $q = request::get("q") ?? "";
+    $q = request::get("q"); if ($q == null) { $q = ""; }
     $q = string::trim($q);
-    $items = []; $count = 0;
-    if ($q != "") {
-        $like = "%" . $q . "%";
-        $rows = db::query($c, "SELECT c.type, c.slug, r.title, ct.url_pattern FROM content c JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0 AND (r.title LIKE ? OR r.body_md LIKE ?) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50", [$like, $like]);
-        $count = count($rows);
-        foreach ($rows as $r) {
-            $items = array::push($items, ["url" => string::replace($r["url_pattern"], "{slug}", $r["slug"]), "title" => $r["title"], "type" => $r["type"]]);
+    $lang = block_lang();
+    $lq = request::get("lang"); if ($lq == "en") { $lang = "en"; }
+    $items = []; $count = 0; $too_short = false;
+    $searched = ($q != "");
+    if ($searched) {
+        if (string::len($q) < 2) { $too_short = true; }
+        else {
+            $res = search_query($c, $q, $lang);
+            $items = $res["items"];
+            $count = count($items);
         }
     }
-    return response::html(view("search.html", ["q" => $q, "count" => $count, "items" => $items, "searched" => ($q != "")]));
+    return response::html(view("search.html", ["q" => $q, "count" => $count, "items" => $items, "searched" => $searched,
+        "too_short" => $too_short, "no_results" => ($searched && !$too_short && $count == 0), "lang" => $lang,
+        "page_title" => "Arama: " . $q]));
 });
 
 // ── syndication + crawlability: sitemap.xml · robots.txt · RSS feed ──────────

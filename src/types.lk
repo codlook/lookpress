@@ -10,6 +10,7 @@ use string;
 use html;
 use date;
 use "../lib/markdown.lk";
+use "search.lk";   // arama indeksi: save_content sonunda search_index_content()
 
 // ── dispatcher type-pattern cache ────────────────────────────────────────────
 // The request-time dispatcher resolves url_pattern -> type slug on EVERY public hit.
@@ -452,5 +453,7 @@ function save_content($c, $type, $id, $slug, $values, $status, $lang) {
         }
     }
     db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ?, publish_at = ? WHERE id = ?", [$rid, $prev, $pub_at, $id]);
+    // Arama indeksi (src/search.lk). FTS5 yoksa no-op; hata kaydı asla düşürmez.
+    try { search_index_content($c, $id); } catch ($e) { }
     return $id;
 }

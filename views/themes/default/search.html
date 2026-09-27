@@ -2,11 +2,17 @@
 {#block "content"}
 <h2>Arama <span class="muted">({$count})</span></h2>
 <form method="get" action="/search" class="search-page">
-  <input type="search" name="q" value="{$q}" placeholder="Ürün, yazı, sayfa ara…">
+  <input type="search" name="q" value="{$q}" placeholder="Ürün, yazı, sayfa ara…" minlength="2">
+  <input type="hidden" name="lang" value="{$lang}">
   <button>Ara</button>
 </form>
-<ul class="pages">
-{#each $items as $it}<li><a href="{$it.url}">{$it.title}</a> <span class="muted">({$it.type})</span></li>{/each}
+{#if $too_short}<p class="muted">Aramak için en az 2 karakter girin.</p>{/if}
+{#if $no_results}<p class="muted">"{$q}" için sonuç yok.</p>{/if}
+<ul class="pages search-results">
+{#each $items as $it}<li class="search-hit">
+  <a href="{$it.url}">{$it.title}</a>
+  <span class="muted"> · {$it.module_label}{#if $it.has_date} · {$it.date}{/if}</span>
+  {#if $it.has_snippet}<p class="muted search-snippet">{!$it.snippet_html}</p>{/if}
+</li>{/each}
 </ul>
-{#if $searched}{#if $count == 0}<p class="muted">"{$q}" için sonuç yok.</p>{/if}{/if}
 {/block}

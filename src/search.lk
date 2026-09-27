@@ -1,0 +1,243 @@
+// src/search.lk — site içi arama: indeks bakımı + sorgu.
+//
+// İki mod, tek API:
+//   "fts5" : SQLite VE derlenmiş SQLite'ta FTS5 varsa (PRAGMA compile_options →
+//            ENABLE_FTS5). Sanal tablo content_fts tembel+idempotent kurulur
+//            (extensions/members kalıbı; setup_v2.lk'ye DOKUNULMAZ). bm25 sıralama,
+//            snippet() ile vurgulu özet.
+//   "like" : MySQL / Postgres / FTS5'siz SQLite. title + body_md + fields_json
+//            üzerinde LIKE '%q%'; özet LOOK tarafında kesilip <mark>'lanır.
+//
+// Yetenek tespiti süreç başına BİR kez (cache:: uzun TTL). FTS5 SQL'i çalışma
+// zamanında hata verirse (eski dosya, bozuk tablo, vs.) mod "like"e düşer ve
+// BİR kez log::warn yazılır — arama asla 500 vermez.
+//
+// XSS GEREKÇESİ (snippet neden {!raw} basılabiliyor):
+//   FTS'e yazılan metin ÖNCE html::strip (etiketler gider) SONRA html::escape
+//   (kalan < > & " ' entity olur) ile indekslenir. Yani indeksteki her karakter
+//   zaten "yazdırılmaya hazır" HTML metnidir; snippet() sadece bizim verdiğimiz
+//   <mark>/</mark>/… parçalarını ekler. Dolayısıyla snippet çıktısı raw basılır ama
+//   içinde kullanıcı kaynaklı etiket/karakter yoktur. LIKE modunda özet LOOK'ta
+//   üretilir: parçalar html::escape'ten geçer, <mark> yine bizimdir.
+//
+// Kendini onaran indeks: sonuçlar her zaman content'e JOIN'lenir (silinen içerik
+// kaybolur; published_rev>0 ve dil filtresi content'ten okunur). Tablo boşken
+// içerik varsa (ilk kurulum / eski DB) tam yeniden-indeks tembel tetiklenir.
+use db;
+use cache;
+use array;
+use json;
+use type;
+use string;
+use html;
+use log;
+use date;
+
+// ── mod tespiti (süreç başına bir kez) ───────────────────────────────────────
+function search_mode($c) {
+    $m = cache::get("cms:search_mode");
+    if ($m != null) { return $m; }
+    $m = "like";
+    try {
+        if (db::driver($c) == "sqlite") {
+            $rows = db::query($c, "PRAGMA compile_options", []);
+            foreach ($rows as $r) {
+                // kolon adı sürüme göre değişebilir → satırı JSON'a çevirip ara
+                if (string::contains(string::upper(json::encode($r)), "ENABLE_FTS5")) { $m = "fts5"; }
+            }
+        }
+    } catch ($e) { $m = "like"; }
+    if ($m == "fts5") {
+        try { search_fts_schema($c); }
+        catch ($e) { $m = "like"; log::warn("search: FTS5 detected but schema failed, using LIKE: " . type::to_string($e)); }
+    }
+    cache::set("cms:search_mode", $m, 86400);
+    return $m;
+}
+// Çalışma zamanında FTS hatası → kalıcı olarak LIKE'a düş, bir kez logla.
+function search_fts_disable($why) {
+    cache::set("cms:search_mode", "like", 86400);
+    log::warn("search: FTS5 disabled at runtime, falling back to LIKE: " . type::to_string($why));
+}
+// İndeks şeması (tembel, idempotent). content_id/lang/type filtre kolonları
+// (UNINDEXED); title=3, body=4 sütun indeksleri snippet/bm25 için sabittir.
+function search_fts_schema($c) {
+    db::exec($c, "CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(content_id UNINDEXED, lang UNINDEXED, type UNINDEXED, title, body, tokenize='unicode61 remove_diacritics 2')", []);
+}
+
+// ── indekslenecek düz metin ──────────────────────────────────────────────────
+// Metin-benzeri alan değerlerini topla: string (medya/URL değilse), blocks/repeater
+// listelerinde text/title/subtitle/content/body/caption anahtarları (derinlik ≤ 4).
+function search_collect_text($v, $depth) {
+    // derinlik: JSON-in-string çözümü de bir seviye yer; columns→cols→blocks→text ≈ 6
+    if ($v == null || $depth > 10) { return ""; }
+    if (type::is_string($v)) {
+        $s = string::trim($v);
+        if ($s == "") { return ""; }
+        if (string::starts_with($s, "/media/") || string::starts_with($s, "http://") || string::starts_with($s, "https://")) { return ""; }
+        // JSON-in-string (blocks/gallery/repeater textarea) → çöz ve içine in
+        if (string::starts_with($s, "[") || string::starts_with($s, "{")) {
+            $d = json::decode($s);
+            if ($d != null && type::is_array($d)) { return search_collect_text($d, $depth + 1); }
+        }
+        return $s . " ";
+    }
+    if (type::is_array($v)) {
+        $out = "";
+        $keys = array::keys($v);
+        $n = count($keys); $i = 0;
+        while ($i < $n) {
+            $k = $keys[$i]; $i = $i + 1;
+            $ks = type::to_string($k);
+            // liste (sayısal anahtar) → her öğe; assoc → yalnız metin anahtarları
+            $take = false;
+            if (string::regex_match($ks, "^[0-9]+$")) { $take = true; }
+            if ($ks == "text" || $ks == "title" || $ks == "subtitle" || $ks == "content" || $ks == "body" || $ks == "caption" || $ks == "items" || $ks == "blocks" || $ks == "rows" || $ks == "columns" || $ks == "cols") { $take = true; }
+            if ($take) { $out = $out . search_collect_text($v[$k], $depth + 1); }
+        }
+        return $out;
+    }
+    return "";
+}
+// Bir revizyon → indeks metni (HTML soyulmuş, boşluk sıkıştırılmış, ESCAPE edilmiş).
+function search_plain_text($body_html, $fields_json) {
+    $txt = "";
+    if ($body_html != null && $body_html != "") { $txt = html::strip($body_html) . " "; }
+    $vals = json::decode($fields_json);
+    if ($vals != null && type::is_array($vals)) {
+        $keys = array::keys($vals);
+        $n = count($keys); $i = 0;
+        while ($i < $n) {
+            $k = type::to_string($keys[$i]); $i = $i + 1;
+            if ($k == "body" || $k == "title" || $k == "seo_title" || $k == "seo_desc") { continue; }
+            $txt = $txt . search_collect_text($vals[$k], 0);
+        }
+    }
+    // Tüm toplananı soy (blok metinlerinde de etiket olabilir) ve html::strip'in
+    // bıraktığı yaygın entity'leri düz karaktere çevir (&amp; en SON — çift çözüm olmasın).
+    // Sonuç DÜZ METİN; escape indeks yazımında / özet üretiminde yapılır.
+    $txt = html::strip($txt);
+    $txt = string::replace($txt, "&lt;", "<"); $txt = string::replace($txt, "&gt;", ">");
+    $txt = string::replace($txt, "&quot;", "\""); $txt = string::replace($txt, "&#39;", "'");
+    $txt = string::replace($txt, "&nbsp;", " "); $txt = string::replace($txt, "&amp;", "&");
+    $txt = string::regex_replace($txt, "\\s+", " ");
+    return string::trim($txt);
+}
+
+// ── indeks bakımı ────────────────────────────────────────────────────────────
+// save_content sonunda çağrılır (src/types.lk). current_rev indekslenir: zamanlanmış
+// yayın published_rev'i sonradan çevirir, sorgu published_rev>0'ı content'ten okur.
+function search_index_content($c, $id) {
+    if (search_mode($c) != "fts5") { return; }
+    try {
+        db::exec($c, "DELETE FROM content_fts WHERE content_id = ?", [$id]);
+        $rows = db::query($c, "SELECT c.id, c.type, c.lang, r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.id = ?", [$id]);
+        if (count($rows) == 0) { return; }
+        search_fts_insert_row($c, $rows[0]);
+    } catch ($e) { search_fts_disable($e); }
+}
+function search_fts_insert_row($c, $r) {
+    $title = $r["title"]; if ($title == null) { $title = ""; }
+    // ESCAPE: snippet çıktısının raw basılabilmesinin tek dayanağı (bkz. dosya başı).
+    db::exec($c, "INSERT INTO content_fts (content_id, lang, type, title, body) VALUES (?, ?, ?, ?, ?)",
+        [$r["id"], $r["lang"], $r["type"], html::escape($title), html::escape(search_plain_text($r["body_html"], $r["fields_json"]))]);
+}
+// Tam yeniden indeks (silinen içeriklerin artıkları da gider).
+function search_reindex_all($c) {
+    if (search_mode($c) != "fts5") { return 0; }
+    $n = 0;
+    try {
+        db::exec($c, "DELETE FROM content_fts", []);
+        $rows = db::query($c, "SELECT c.id, c.type, c.lang, r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.current_rev > 0", []);
+        foreach ($rows as $r) { search_fts_insert_row($c, $r); $n = $n + 1; }
+    } catch ($e) { search_fts_disable($e); }
+    return $n;
+}
+// Tembel: indeks boş ama yayınlanmış içerik varsa (ilk kurulum / eski DB) doldur.
+function search_lazy_reindex($c) {
+    try {
+        $f = db::query($c, "SELECT COUNT(*) AS n FROM content_fts", []);
+        if (type::to_int($f[0]["n"]) > 0) { return; }
+        $k = db::query($c, "SELECT COUNT(*) AS n FROM content WHERE published_rev > 0", []);
+        if (type::to_int($k[0]["n"]) == 0) { return; }
+        search_reindex_all($c);
+    } catch ($e) { search_fts_disable($e); }
+}
+
+// ── sorgu ────────────────────────────────────────────────────────────────────
+// Kullanıcı metni → FTS5 MATCH ifadesi: kelimelere böl, her kelime "..."* (önek,
+// tırnak içi → operatör/sözdizimi enjeksiyonu imkânsız; " → "" kaçırılır), AND ile
+// bağla, en fazla 8 kelime. Boş → "".
+function search_fts_expr($q) {
+    $parts = string::split(string::trim($q), " ");
+    $out = ""; $n = 0;
+    foreach ($parts as $p) {
+        $w = string::trim($p);
+        $w = string::replace($w, "\"", "\"\"");
+        $w = string::replace($w, "*", "");
+        if ($w == "" || $n >= 8) { continue; }
+        if ($out != "") { $out = $out . " AND "; }
+        $out = $out . "\"" . $w . "\"*";
+        $n = $n + 1;
+    }
+    return $out;
+}
+// Sonuç satırı → şablon öğesi. url = lang_prefix + url_pattern({slug}); modül etiketi
+// config plural; tarih d.m.Y.
+function search_item($r, $lang, $snippet_html) {
+    $cfg = type_config_decode($r["type"], $r["label"], $r["config_json"]);
+    $ts = $r["updated_at"]; $d = "";
+    if ($ts != null && type::to_int($ts) > 0) { $d = date::format(type::to_int($ts), "d.m.Y"); }
+    return ["title" => $r["title"], "url" => lang_prefix($lang) . string::replace($r["url_pattern"], "{slug}", $r["slug"]),
+            "module_label" => $cfg["plural"], "snippet_html" => $snippet_html, "has_snippet" => ($snippet_html != ""),
+            "date" => $d, "has_date" => ($d != "")];
+}
+// LIKE modu özeti: ilk eşleşme çevresinden ~160 karakter, eşleşme <mark> içinde.
+// Parçalar ayrı ayrı html::escape edilir; <mark> bizimdir.
+function search_like_excerpt($plain, $q) {
+    if ($plain == "") { return ""; }
+    $lp = string::lower($plain); $lq = string::lower($q);
+    $i = -1;
+    if (string::len($lp) == string::len($plain)) { $i = string::index_of($lp, $lq); }
+    if ($i < 0) {
+        $s = string::substr($plain, 0, 160);
+        if (string::len($plain) > 160) { $s = $s . "…"; }
+        return html::escape($s);
+    }
+    $ql = string::len($q);
+    $start = $i - 60; if ($start < 0) { $start = 0; }
+    $pre = ""; if ($start > 0) { $pre = "…"; }
+    $before = string::substr($plain, $start, $i - $start);
+    $match = string::substr($plain, $i, $ql);
+    $after = string::substr($plain, $i + $ql, 100);
+    $post = ""; if (string::len($plain) > $i + $ql + 100) { $post = "…"; }
+    return $pre . html::escape($before) . "<mark>" . html::escape($match) . "</mark>" . html::escape($after) . $post;
+}
+// Ana giriş: {items, mode}. q < 2 karakter → boş liste (rota dostça mesaj basar).
+function search_query($c, $q, $lang) {
+    $items = [];
+    $q = string::trim($q);
+    if (string::len($q) < 2) { return ["items" => $items, "mode" => search_mode($c)]; }
+    if (search_mode($c) == "fts5") {
+        try {
+            search_lazy_reindex($c);
+            $expr = search_fts_expr($q);
+            if ($expr == "") { return ["items" => $items, "mode" => "fts5"]; }
+            // Görünen başlık revisions'tan (düz metin; şablon {$it.title} escape eder).
+            // f.title ESCAPE'li indeks kopyasıdır, sadece eşleştirme/bm25 için.
+            $rows = db::query($c, "SELECT c.type, c.slug, c.updated_at, r.title, snippet(content_fts, 4, '<mark>', '</mark>', '…', 12) AS snip, ct.url_pattern, ct.label, ct.config_json FROM content_fts f JOIN content c ON c.id = f.content_id JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE content_fts MATCH ? AND c.published_rev > 0 AND c.lang = ? AND ct.url_pattern != '' ORDER BY bm25(content_fts) LIMIT 50", [$expr, $lang]);
+            foreach ($rows as $r) {
+                $snip = $r["snip"]; if ($snip == null) { $snip = ""; }
+                $items = array::push($items, search_item($r, $lang, $snip));
+            }
+            return ["items" => $items, "mode" => "fts5"];
+        } catch ($e) { search_fts_disable($e); $items = []; }
+    }
+    $like = "%" . $q . "%";
+    $rows = db::query($c, "SELECT c.type, c.slug, c.updated_at, r.title, r.body_html, r.fields_json, ct.url_pattern, ct.label, ct.config_json FROM content c JOIN revisions r ON r.id = c.published_rev JOIN content_types ct ON ct.slug = c.type WHERE c.published_rev > 0 AND c.lang = ? AND ct.url_pattern != '' AND (r.title LIKE ? OR r.body_md LIKE ? OR r.fields_json LIKE ?) ORDER BY c.updated_at DESC, c.id DESC LIMIT 50", [$lang, $like, $like, $like]);
+    foreach ($rows as $r) {
+        $plain = search_plain_text($r["body_html"], $r["fields_json"]);
+        $items = array::push($items, search_item($r, $lang, search_like_excerpt($plain, $q)));
+    }
+    return ["items" => $items, "mode" => "like"];
+}
