@@ -892,3 +892,92 @@ route("POST", "/admin/settings", function() {
     if (!string::regex_match($tab, "^[a-z]+$")) { $tab = "genel"; }
     return response::redirect("/admin/settings?saved=1&tab=" . $tab);
 });
+
+// ── admin: WordPress WXR içe aktarma (src/importer.lk) ───────────────────────
+// İki rota: GET sayfa, POST yükle+çalıştır. Dosya yalnız okunur (kalıcı saklanmaz),
+// XML'den gelen hiçbir şey çalıştırılmaz; rapor şablonda {$x} ile kaçışlanır.
+use "../src/importer.lk";
+function import_page_data($lang, $do_pages, $do_posts, $with_drafts, $dry_run) {
+    $d = array::new_assoc();
+    $d = array::set($d, "lang_tr", ($lang != "en"));
+    $d = array::set($d, "lang_en", ($lang == "en"));
+    $d = array::set($d, "do_pages", $do_pages);
+    $d = array::set($d, "do_posts", $do_posts);
+    $d = array::set($d, "with_drafts", $with_drafts);
+    $d = array::set($d, "dry_run", $dry_run);
+    $d = array::set($d, "error", "");
+    $d = array::set($d, "has_error", false);
+    $d = array::set($d, "has_report", false);
+    return $d;
+}
+function import_fail($d, $msg) {
+    $d = array::set($d, "error", $msg);
+    $d = array::set($d, "has_error", true);
+    return response::html(admin_view("admin_import.html", $d));
+}
+route("GET", "/admin/import", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $dl = setting_get(conn(), "default_lang", "tr");
+    return response::html(admin_view("admin_import.html", import_page_data(norm_lang($dl), true, true, false, true)));
+});
+route("POST", "/admin/import", function() {
+    if (!is_admin()) { return response::redirect("/admin/login"); }
+    if (!can("settings")) { return response::status(403, "Yetkiniz yok."); }
+    $lang = norm_lang(request::post("lang"));
+    $do_pages = (request::post("do_pages") == "1");
+    $do_posts = (request::post("do_posts") == "1");
+    $with_drafts = (request::post("with_drafts") == "1");
+    $dry_run = (request::post("dry_run") == "1");
+    $d = import_page_data($lang, $do_pages, $do_posts, $with_drafts, $dry_run);
+    // Çekirdek, "<?xml" içeren dosyayı image/svg+xml olarak algılar → allow_svg gerekir
+    // (dosya hiçbir yere servis edilmez, yalnız ayrıştırılır). Sınır: 25 MB.
+    $f = null; $too_big = false;
+    try {
+        $f = request::file("file", ["max_size" => 26214400, "allow_svg" => true,
+            "allow_mime" => ["image/svg+xml", "text/plain", "application/octet-stream"]]);
+    } catch ($e) { $f = null; $too_big = true; }
+    if ($f == null) {
+        if ($too_big) { return import_fail($d, "Dosya kabul edilmedi: en fazla 25 MB boyutunda bir WordPress XML (WXR) dosyası yükleyin."); }
+        return import_fail($d, "Dosya seçilmedi.");
+    }
+    if ($f["size"] > 26214400) { return import_fail($d, "Dosya 25 MB sınırını aşıyor."); }
+    $xml = "";
+    try { $xml = file::read($f["path"]); } catch ($e) { $xml = ""; }
+    if ($xml == "") { return import_fail($d, "Yüklenen dosya okunamadı."); }
+    if (!string::contains($xml, "<rss") || !string::contains($xml, "<channel") || !string::contains($xml, "<item>")) {
+        return import_fail($d, "Bu dosya bir WordPress dışa aktarım (WXR) dosyası gibi görünmüyor.");
+    }
+    if (!$do_pages && !$do_posts) { return import_fail($d, "En az bir içerik türü seçin (sayfalar veya yazılar)."); }
+    $rep = null;
+    try {
+        $doc = wxr_parse($xml, 2000);
+        $rep = wxr_import(conn(), $doc, ["lang" => $lang, "do_pages" => $do_pages, "do_posts" => $do_posts,
+            "with_drafts" => $with_drafts, "dry_run" => $dry_run]);
+    } catch ($e) { $rep = null; }
+    if ($rep == null) { return import_fail($d, "İçe aktarma sırasında beklenmeyen bir hata oluştu; dosya ayrıştırılamadı."); }
+    $rows = [];
+    foreach ($rep["rows"] as $r) {
+        $rows = array::push($rows, ["title" => $r["title"], "type" => $r["type"], "reason" => $r["reason"],
+            "is_ok" => ($r["result"] == "imported" || $r["result"] == "preview"),
+            "is_skip" => ($r["result"] == "skipped"), "is_err" => ($r["result"] == "error")]);
+    }
+    $d = array::set($d, "has_report", true);
+    $d = array::set($d, "was_dry", $dry_run);
+    $d = array::set($d, "was_real", !$dry_run);
+    $d = array::set($d, "filename", $f["filename"]);
+    $d = array::set($d, "site_title", $rep["site"]["title"]);
+    $d = array::set($d, "site_url", $rep["site"]["url"]);
+    $d = array::set($d, "rows", $rows);
+    $d = array::set($d, "has_rows", (count($rows) > 0));
+    $d = array::set($d, "counts", $rep["counts"]);
+    $d = array::set($d, "has_counts", (count($rep["counts"]) > 0));
+    $d = array::set($d, "n_imported", $rep["n_imported"]);
+    $d = array::set($d, "n_skipped", $rep["n_skipped"]);
+    $d = array::set($d, "n_errors", $rep["n_errors"]);
+    $d = array::set($d, "n_categories", $rep["n_categories"]);
+    $d = array::set($d, "n_tags", $rep["n_tags"]);
+    $d = array::set($d, "truncated", $rep["truncated"]);
+    $d = array::set($d, "total", $rep["total"]);
+    return response::html(admin_view("admin_import.html", $d));
+});

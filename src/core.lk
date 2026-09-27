@@ -267,7 +267,8 @@ function admin_sidebar($c, $ext_nav) {
             if ($can_settings) {
                 $items = $items . nav_link("/admin/settings", "⚙", "Genel Ayarlar")
                                 . nav_link("/admin/themes", "◪", "Tema")
-                                . nav_link("/admin/menu", "☰", "Menü");
+                                . nav_link("/admin/menu", "☰", "Menü")
+                                . nav_link("/admin/import", "⇪", "İçe Aktar (WordPress)");
             }
             if (can("types")) { $items = $items . nav_link("/admin/types", "◲", "Modül Yönetimi"); }
         }

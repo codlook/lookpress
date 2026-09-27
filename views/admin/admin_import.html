@@ -1,0 +1,74 @@
+{#extends "views/admin/layout"}
+{#block "content"}
+<style>
+ .imp-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:18px;max-width:820px}
+ .imp-box label{display:block;margin:10px 0}
+ .imp-box label.chk{display:flex;align-items:center;gap:8px;margin:6px 0}
+ .imp-note{font-size:13px;color:var(--muted);margin:6px 0}
+ .imp-sum span{display:inline-block;padding:3px 10px;border-radius:20px;margin:0 6px 6px 0;font-weight:600;font-size:13px}
+ .imp-ok{background:#dcfce7;color:#166534}
+ .imp-skip{background:#fef3c7;color:#92400e}
+ .imp-err{background:#fee2e2;color:#991b1b}
+ .imp-dry{background:#dbeafe;color:#1e40af}
+</style>
+<div class="section-head"><h2>İçe Aktar (WordPress)</h2><a class="more" href="/admin/settings">&larr; Ayarlar</a></div>
+{#if $has_error}<p class="error">{$error}</p>{/if}
+
+{#if $has_report}
+<div class="imp-box">
+  <h3>Rapor</h3>
+  {#if $was_dry}<p class="imp-sum"><span class="imp-dry">Önizleme (dry-run) — hiçbir şey kaydedilmedi</span></p>{/if}
+  <p class="imp-note">Dosya: <b>{$filename}</b> &middot; Kaynak site: {$site_title} {$site_url} &middot; Dosyadaki toplam öğe: {$total}</p>
+  <p class="imp-sum">
+    {#if $was_dry}<span class="imp-ok">{$n_imported} aktarılacak</span>{/if}
+    {#if $was_real}<span class="imp-ok">{$n_imported} aktarıldı</span>{/if}
+    <span class="imp-skip">{$n_skipped} atlandı</span>
+    <span class="imp-err">{$n_errors} hata</span>
+  </p>
+  {#if $truncated}<p class="error">Dosya 2000 öğe sınırını aşıyor; yalnız ilk 2000 öğe işlendi.</p>{/if}
+  <p class="imp-note">Kategori: {$n_categories} &middot; Etiket: {$n_tags} (modülde <code>category</code> alanı varsa ilk kategori yazılır; etiketler yalnız sayılır).</p>
+  {#if $has_counts}
+  <div class="table-wrap"><table>
+  <thead><tr><th>Tür</th><th>Aktarılan</th><th>Atlanan</th><th>Hata</th></tr></thead>
+  <tbody>
+  {#each $counts as $k}<tr><td><code>{$k.type}</code></td><td>{$k.imported}</td><td>{$k.skipped}</td><td>{$k.errors}</td></tr>{/each}
+  </tbody></table></div>
+  {/if}
+  {#if $has_rows}
+  <h3>İlk 20 öğe</h3>
+  <div class="table-wrap"><table>
+  <thead><tr><th>Başlık</th><th>Tür</th><th>Sonuç</th><th>Ayrıntı</th></tr></thead>
+  <tbody>
+  {#each $rows as $r}<tr>
+    <td>{$r.title}</td>
+    <td><code>{$r.type}</code></td>
+    <td class="imp-sum">{#if $r.is_ok}<span class="imp-ok">tamam</span>{/if}{#if $r.is_skip}<span class="imp-skip">atlandı</span>{/if}{#if $r.is_err}<span class="imp-err">hata</span>{/if}</td>
+    <td>{$r.reason}</td>
+  </tr>{/each}
+  </tbody></table></div>
+  {/if}
+  {#if !$has_rows}<p class="muted">Dosyada içe aktarılabilir öğe bulunamadı.</p>{/if}
+</div>
+{/if}
+
+<div class="imp-box">
+<form method="post" action="/admin/import" enctype="multipart/form-data">
+  <label>WordPress dışa aktarım dosyası (.xml, en fazla 25 MB)
+    <input type="file" name="file" accept=".xml,text/xml,application/xml" required></label>
+  <label>Dil
+    <select name="lang">
+      <option value="tr"{#if $lang_tr} selected{/if}>Türkçe (tr)</option>
+      <option value="en"{#if $lang_en} selected{/if}>English (en)</option>
+    </select></label>
+  <label class="chk"><input type="checkbox" name="do_pages" value="1"{#if $do_pages} checked{/if}> Sayfaları içe aktar</label>
+  <label class="chk"><input type="checkbox" name="do_posts" value="1"{#if $do_posts} checked{/if}> Yazıları içe aktar</label>
+  <label class="chk"><input type="checkbox" name="with_drafts" value="1"{#if $with_drafts} checked{/if}> Taslakları da al</label>
+  <label class="chk"><input type="checkbox" name="dry_run" value="1"{#if $dry_run} checked{/if}> Sadece önizle (dry-run)</label>
+  <button type="submit">İçe aktar</button>
+</form>
+<p class="imp-note">WordPress panelinde <b>Araçlar &rarr; Dışa Aktar</b> ile alınan WXR dosyasını yükleyin. Yazılar <code>post</code>, sayfalar <code>page</code> modülüne; diğer yazı türleri aynı adlı modül varsa ona aktarılır, yoksa atlanır.</p>
+<p class="imp-note">Aynı adrese (slug) sahip içerik zaten varsa atlanır; dosyayı tekrar yüklemek kopya oluşturmaz. En fazla 2000 öğe işlenir.</p>
+<p class="imp-note"><b>Medya dosyaları indirilmez:</b> görseller ve öne çıkan görsel, kaynak sitedeki dış URL'leriyle olduğu gibi kalır. Kaynak site kapanırsa görseller görünmez; kalıcı olması için Medya bölümüne yükleyip bağlantıları güncelleyin.</p>
+<p class="imp-note">Güvenlik: içerikteki script, iframe, form ve olay öznitelikleri içe aktarılırken temizlenir.</p>
+</div>
+{/block}

@@ -1,0 +1,557 @@
+// src/importer.lk — WordPress WXR (eXtended RSS) içe aktarıcı.
+//
+// Çekirdekte XML modülü yok; burada WXR'nin ihtiyaç duyulan alt kümesi için
+// toleranslı, split-tabanlı küçük bir ayrıştırıcı var. Neden split? Çekirdekte
+// string::index_of BAYT, string::substr KOD-NOKTASI sayar — Türkçe içerikte ofset
+// karıştırmak bozar; string::split ikisinden de bağımsız (bayt-düzeyi ayırıcı,
+// parçalar bütün UTF-8 dizileri). Regex fonksiyonları 64 KB girdi sınırlı → içerik
+// üstünde regex YOK.
+//
+// Akış: wxr_parse($xml) → {site, items[]}  (saf, DB yok, birim-test edilebilir)
+//       wxr_import($c, $doc, $opts)        → rapor (DB yazımı save_content ile;
+//                                            dry_run'da hiç yazmaz)
+// XML'den gelen hiçbir şey çalıştırılmaz; rapora giden her değer şablonda {$x}
+// ile kaçışlanır. Medya dosyaları İNDİRİLMEZ — dış URL'ler olduğu gibi kalır.
+use string;
+use type;
+use array;
+use json;
+use html;
+use math;
+use date;
+use db;
+
+// ── XML yardımcıları ──────────────────────────────────────────────────────────
+
+// Sayısal XML varlıkları (&#8217; / &#x2019;) → UTF-8. Çekirdekte chr() yok;
+// JSON \uXXXX çözümü kod noktasını UTF-8'e çevirir (BMP dışı için surrogate çifti).
+function wxr_codepoint_to_utf8($cp) {
+    if ($cp <= 0 || $cp > 1114111) { return ""; }
+    if ($cp >= 55296 && $cp <= 57343) { return ""; }   // yalnız surrogate — geçersiz
+    $hex = "0123456789abcdef";
+    if ($cp < 65536) {
+        $h = ""; $v = $cp; $i = 0;
+        while ($i < 4) { $h = string::substr($hex, $v % 16, 1) . $h; $v = math::floor($v / 16); $i = $i + 1; }
+        $out = json::decode("\"\\u" . $h . "\"");
+        if ($out == null) { return ""; }
+        return $out;
+    }
+    // BMP dışı: surrogate çifti TEK JSON dizgesinde çözülür (yarımlar ayrı çözülemez).
+    $v2 = $cp - 65536;
+    $hi = 55296 + math::floor($v2 / 1024);
+    $lo = 56320 + ($v2 % 1024);
+    $j = json::decode("\"\\u" . wxr_hex4($hi) . "\\u" . wxr_hex4($lo) . "\"");
+    if ($j == null) { return ""; }
+    return $j;
+}
+function wxr_hex_to_int($h) {
+    $h = string::lower($h);
+    $digits = "0123456789abcdef";
+    $n = 0; $i = 0; $len = string::len($h);
+    while ($i < $len) {
+        $d = string::index_of($digits, string::substr($h, $i, 1));
+        if ($d < 0) { return -1; }
+        $n = $n * 16 + $d; $i = $i + 1;
+    }
+    return $n;
+}
+// &#NNN; ve &#xHH; çözümü (yalnız BMP; BMP dışı kod noktaları için surrogate çifti JSON'la).
+function wxr_decode_numeric($s) {
+    if (!string::contains($s, "&#")) { return $s; }
+    $parts = string::split($s, "&#");
+    $out = $parts[0];
+    $i = 1;
+    while ($i < count($parts)) {
+        $p = $parts[$i];
+        $semi = string::index_of($p, ";");
+        $done = false;
+        if ($semi > 0 && $semi <= 8) {
+            $num = string::substr($p, 0, $semi);   // ASCII → bayt = kod noktası
+            $cp = -1;
+            if (string::regex_match($num, "^[0-9]+$")) { $cp = type::to_int($num); }
+            if (string::regex_match($num, "^[xX][0-9a-fA-F]+$")) { $cp = wxr_hex_to_int(string::substr($num, 1)); }
+            if ($cp >= 0) {
+                $ch = wxr_codepoint_to_utf8($cp);
+                $out = $out . $ch . string::substr($p, $semi + 1);
+                $done = true;
+            }
+        }
+        if (!$done) { $out = $out . "&#" . $p; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+function wxr_hex4($v) {
+    $hex = "0123456789abcdef"; $h = ""; $i = 0;
+    while ($i < 4) { $h = string::substr($hex, $v % 16, 1) . $h; $v = math::floor($v / 16); $i = $i + 1; }
+    return $h;
+}
+// XML varlıkları → düz metin (&amp; en son; sayısal olanlar önce).
+function wxr_unescape($s) {
+    if (!string::contains($s, "&")) { return $s; }
+    $s = wxr_decode_numeric($s);
+    $s = string::replace($s, "&lt;", "<");
+    $s = string::replace($s, "&gt;", ">");
+    $s = string::replace($s, "&quot;", "\"");
+    $s = string::replace($s, "&apos;", "'");
+    $s = string::replace($s, "&amp;", "&");
+    return $s;
+}
+// Bir öğe gövdesi: CDATA ise ham içerik, değilse varlık-çözülmüş metin.
+function wxr_text($raw) {
+    $t = string::trim($raw);
+    if (string::starts_with($t, "<![CDATA[")) {
+        // WordPress içerikteki "]]>" dizisini "]]]]><![CDATA[>" diye böler → birden çok
+        // CDATA bölümü olabilir; hepsini sırayla birleştir (aradaki metin varlık-çözülür).
+        $secs = string::split($t, "<![CDATA[");
+        $out = wxr_unescape($secs[0]);
+        $i = 1;
+        while ($i < count($secs)) {
+            $p = string::split($secs[$i], "]]>", 2);
+            $out = $out . $p[0];
+            if (count($p) == 2) { $out = $out . wxr_unescape($p[1]); }
+            $i = $i + 1;
+        }
+        return $out;
+    }
+    return wxr_unescape($t);
+}
+// İlk <tag>…</tag> içeriği; yoksa "". Self-closing (<tag/>) → "".
+function wxr_tag($xml, $tag) {
+    $p = string::split($xml, "<" . $tag . ">", 2);
+    if (count($p) < 2) { return ""; }
+    $q = string::split($p[1], "</" . $tag . ">", 2);
+    if (count($q) < 2) { return ""; }
+    return wxr_text($q[0]);
+}
+// Bir açılış etiketindeki attribute değeri: attr="…" (yoksa "").
+function wxr_attr($open, $name) {
+    $p = string::split($open, " " . $name . "=\"", 2);
+    if (count($p) < 2) { return ""; }
+    $q = string::split($p[1], "\"", 2);
+    return wxr_unescape($q[0]);
+}
+
+// ── WXR ayrıştırma ────────────────────────────────────────────────────────────
+// Döner: ["site" => {title, url}, "items" => [...], "truncated" => bool, "total" => n]
+// item: {post_id, title, link, creator, content, excerpt, post_type, status,
+//        post_name, post_date, post_date_gmt, attachment_url, thumbnail_id,
+//        categories[], tags[]}
+function wxr_parse($xml, $max_items) {
+    $chunks = string::split($xml, "<item>");
+    $head = $chunks[0];
+    $site = array::new_assoc();
+    $site = array::set($site, "title", wxr_tag($head, "title"));
+    $site = array::set($site, "url", wxr_tag($head, "base_site_url"));
+    if ($site["url"] == "") { $site = array::set($site, "url", wxr_tag($head, "wp:base_site_url")); }
+    $items = [];
+    $total = count($chunks) - 1;
+    $truncated = false;
+    $i = 1;
+    while ($i < count($chunks)) {
+        if (count($items) >= $max_items) { $truncated = true; break; }
+        $body = string::split($chunks[$i], "</item>", 2)[0];
+        $items = array::push($items, wxr_parse_item($body));
+        $i = $i + 1;
+    }
+    return ["site" => $site, "items" => $items, "truncated" => $truncated, "total" => $total];
+}
+function wxr_parse_item($b) {
+    $it = array::new_assoc();
+    $it = array::set($it, "post_id", type::to_int(wxr_tag($b, "wp:post_id")));
+    $it = array::set($it, "title", wxr_tag($b, "title"));
+    $it = array::set($it, "link", wxr_tag($b, "link"));
+    $it = array::set($it, "creator", wxr_tag($b, "dc:creator"));
+    $it = array::set($it, "content", wxr_tag($b, "content:encoded"));
+    $it = array::set($it, "excerpt", wxr_tag($b, "excerpt:encoded"));
+    $it = array::set($it, "post_type", wxr_tag($b, "wp:post_type"));
+    $it = array::set($it, "status", wxr_tag($b, "wp:status"));
+    $it = array::set($it, "post_name", wxr_tag($b, "wp:post_name"));
+    $it = array::set($it, "post_date", wxr_tag($b, "wp:post_date"));
+    $it = array::set($it, "post_date_gmt", wxr_tag($b, "wp:post_date_gmt"));
+    $it = array::set($it, "attachment_url", wxr_tag($b, "wp:attachment_url"));
+    // postmeta: _thumbnail_id
+    $thumb = 0;
+    $metas = string::split($b, "<wp:postmeta>");
+    $m = 1;
+    while ($m < count($metas)) {
+        $mb = string::split($metas[$m], "</wp:postmeta>", 2)[0];
+        if (wxr_tag($mb, "wp:meta_key") == "_thumbnail_id") { $thumb = type::to_int(wxr_tag($mb, "wp:meta_value")); }
+        $m = $m + 1;
+    }
+    $it = array::set($it, "thumbnail_id", $thumb);
+    // kategoriler / etiketler
+    $cats = []; $tags = [];
+    $cs = string::split($b, "<category ");
+    $k = 1;
+    while ($k < count($cs)) {
+        $seg = $cs[$k];
+        $open = string::split($seg, ">", 2);
+        if (count($open) == 2) {
+            $domain = wxr_attr(" " . $open[0], "domain");
+            $name = wxr_text(string::split($open[1], "</category>", 2)[0]);
+            if ($name != "") {
+                if ($domain == "category") { $cats = array::push($cats, $name); }
+                if ($domain == "post_tag") { $tags = array::push($tags, $name); }
+            }
+        }
+        $k = $k + 1;
+    }
+    $it = array::set($it, "categories", $cats);
+    $it = array::set($it, "tags", $tags);
+    return $it;
+}
+
+// ── HTML → hafif markdown (blocks alanı olmayan modüller için) ────────────────
+// LookPress'in markdown_to_html'i satır-içi metni KAÇIŞLAR → ham HTML body'de
+// görünür etiket olur. Blocks alanı yoksa içeriği okunur bir markdown'a indiririz
+// (p/br/h1-h6/strong/em/a/img/li/blockquote/pre korunur, geri kalan etiketler atılır).
+function wxr_html_to_md($h) {
+    if ($h == "") { return ""; }
+    $h = string::replace($h, "\r\n", "\n");
+    // WordPress "wpautop" kaynaklı çift boşluk satırları zaten paragraf ayracıdır.
+    $h = wxr_strip_block($h, "script");
+    $h = wxr_strip_block($h, "style");
+    $h = string::replace($h, "<!-- wp:", "<!--");   // Gutenberg yorumları → aşağıda tümü atılır
+    $h = wxr_strip_comments($h);
+    $tags = ["strong" => "**", "b" => "**", "em" => "*", "i" => "*", "code" => "`"];
+    foreach (array::keys($tags) as $t) {
+        $h = string::replace($h, "<" . $t . ">", $tags[$t]);
+        $h = string::replace($h, "</" . $t . ">", $tags[$t]);
+    }
+    $lvl = 1;
+    while ($lvl <= 6) {
+        $h = wxr_replace_open($h, "h" . $lvl, "\n\n" . string::repeat("#", $lvl) . " ");
+        $h = string::replace($h, "</h" . $lvl . ">", "\n\n");
+        $lvl = $lvl + 1;
+    }
+    $h = wxr_replace_open($h, "p", "\n\n");
+    $h = string::replace($h, "</p>", "\n\n");
+    $h = wxr_replace_open($h, "br", "\n");
+    $h = wxr_replace_open($h, "li", "\n- ");
+    $h = string::replace($h, "</li>", "");
+    $h = wxr_replace_open($h, "blockquote", "\n\n> ");
+    $h = string::replace($h, "</blockquote>", "\n\n");
+    $h = wxr_replace_open($h, "pre", "\n\n```\n");
+    $h = string::replace($h, "</pre>", "\n```\n\n");
+    $h = wxr_replace_open($h, "ul", "\n"); $h = string::replace($h, "</ul>", "\n\n");
+    $h = wxr_replace_open($h, "ol", "\n"); $h = string::replace($h, "</ol>", "\n\n");
+    $h = wxr_links_to_md($h);
+    $h = wxr_imgs_to_md($h);
+    $h = html::strip($h);
+    $h = wxr_unescape($h);
+    // 3+ boş satırı 2'ye indir
+    $guard = 0;
+    while (string::contains($h, "\n\n\n") && $guard < 50) { $h = string::replace($h, "\n\n\n", "\n\n"); $guard = $guard + 1; }
+    return string::trim($h);
+}
+// <tag ...> (attribute'lu/attribute'suz) açılışlarını $rep ile değiştir.
+function wxr_replace_open($h, $tag, $rep) {
+    $h = string::replace($h, "<" . $tag . ">", $rep);
+    $h = string::replace($h, "<" . $tag . "/>", $rep);
+    if (!string::contains($h, "<" . $tag . " ")) { return $h; }
+    $p = string::split($h, "<" . $tag . " ");
+    $out = $p[0]; $i = 1;
+    while ($i < count($p)) {
+        $q = string::split($p[$i], ">", 2);
+        if (count($q) == 2) { $out = $out . $rep . $q[1]; } else { $out = $out . $q[0]; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+function wxr_strip_block($h, $tag) {
+    if (!string::contains($h, "<" . $tag)) { return $h; }
+    $p = string::split($h, "<" . $tag);
+    $out = $p[0]; $i = 1;
+    while ($i < count($p)) {
+        $q = string::split($p[$i], "</" . $tag . ">", 2);
+        if (count($q) == 2) { $out = $out . $q[1]; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+function wxr_strip_comments($h) {
+    if (!string::contains($h, "<!--")) { return $h; }
+    $p = string::split($h, "<!--");
+    $out = $p[0]; $i = 1;
+    while ($i < count($p)) {
+        $q = string::split($p[$i], "-->", 2);
+        if (count($q) == 2) { $out = $out . $q[1]; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+// Yalnız http(s) / kök-göreli / mailto / çapa URL'leri (javascript: vb. reddedilir).
+function wxr_safe_url($u) {
+    $l = string::lower(string::trim($u));
+    if ($l == "") { return false; }
+    if (string::starts_with($l, "http://") || string::starts_with($l, "https://") || string::starts_with($l, "mailto:") || string::starts_with($l, "#")) { return true; }
+    return string::starts_with($l, "/") && !string::starts_with($l, "//");
+}
+function wxr_links_to_md($h) {
+    if (!string::contains($h, "<a ")) { return $h; }
+    $p = string::split($h, "<a ");
+    $out = $p[0]; $i = 1;
+    while ($i < count($p)) {
+        $q = string::split($p[$i], ">", 2);
+        if (count($q) == 2) {
+            $href = wxr_attr(" " . $q[0], "href");
+            $r = string::split($q[1], "</a>", 2);
+            if (count($r) == 2 && wxr_safe_url($href)) { $out = $out . "[" . $r[0] . "](" . $href . ")" . $r[1]; }
+            else { $out = $out . $q[1]; }
+        } else { $out = $out . $q[0]; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+function wxr_imgs_to_md($h) {
+    if (!string::contains($h, "<img ")) { return $h; }
+    $p = string::split($h, "<img ");
+    $out = $p[0]; $i = 1;
+    while ($i < count($p)) {
+        $q = string::split($p[$i], ">", 2);
+        if (count($q) == 2) {
+            $src = wxr_attr(" " . $q[0], "src"); $alt = wxr_attr(" " . $q[0], "alt");
+            if (wxr_safe_url($src)) { $out = $out . "\n\n![" . $alt . "](" . $src . ")\n\n"; }
+            $out = $out . $q[1];
+        } else { $out = $out . $q[0]; }
+        $i = $i + 1;
+    }
+    return $out;
+}
+
+// ── HTML temizliği (html bloğu HAM basılır → XML'den gelen hiçbir şey çalışmamalı) ──
+// script/style/iframe/object/form/... etiketleri atılır (kapsayıcı olanlar içerikleriyle),
+// yorumlar silinir; on* olay attribute'u / javascript: / sayısal varlık gibi şüpheli bir
+// şey taşıyan etiket yalnız güvenli href/src/alt/title ile yeniden kurulur. Regex yalnız
+// KÜÇÜK etiket parçasında çalışır (64 KB sınırı), içerik gövdesinde değil.
+function wxr_flat($s) {
+    return string::replace(string::replace(string::replace($s, "\n", " "), "\t", " "), "\r", " ");
+}
+function wxr_sanitize_html($h) {
+    if (!string::contains($h, "<")) { return $h; }
+    $drop = ["form", "input", "button", "link", "meta", "base", "frame", "frameset", "embed"];
+    $drop_body = ["script", "style", "iframe", "object", "svg", "math", "noscript", "template", "textarea", "select", "applet"];
+    $p = string::split($h, "<");
+    $n = count($p);
+    $out = $p[0]; $i = 1; $skip = "";
+    while ($i < $n) {
+        $seg = $p[$i]; $i = $i + 1;
+        // yorum: "-->" görülene dek (sonraki parçalar dahil) her şeyi at
+        if ($skip == "" && string::starts_with($seg, "!--")) {
+            $cq = string::split($seg, "-->", 2);
+            while (count($cq) < 2 && $i < $n) { $cq = string::split($p[$i], "-->", 2); $i = $i + 1; }
+            if (count($cq) == 2) { $out = $out . $cq[1]; }
+            continue;
+        }
+        $q = string::split($seg, ">", 2);
+        if (count($q) < 2) {
+            if ($skip == "") { $out = $out . "&lt;" . $seg; }   // kapanmamış "<" → metin
+            continue;
+        }
+        $tag = $q[0]; $rest = $q[1];
+        $low = string::trim(wxr_flat(string::lower($tag)));
+        $closing = string::starts_with($low, "/");
+        $name = $low;
+        if ($closing) { $name = string::trim(string::substr($low, 1)); }
+        $nm = string::split(string::replace($name, "/", " "), " ", 2)[0];
+        if ($skip != "") {
+            if ($closing && $nm == $skip) { $skip = ""; $out = $out . $rest; }
+            continue;
+        }
+        if ($nm == "" || string::len($nm) > 32 || !string::regex_match($nm, "^[a-z][a-z0-9]*$")) {
+            $out = $out . "&lt;" . $tag . "&gt;" . $rest;   // etiket değil → metin
+            continue;
+        }
+        if (array::contains($drop_body, $nm)) {
+            if (!$closing && !string::ends_with($low, "/")) { $skip = $nm; } else { $out = $out . $rest; }
+            continue;
+        }
+        if (array::contains($drop, $nm)) { $out = $out . $rest; continue; }
+        if ($closing) { $out = $out . "</" . $nm . ">" . $rest; continue; }
+        $clean = $tag;
+        $sus = true;
+        if (string::len($tag) <= 8000) {
+            $sus = string::regex_match($low, "(^|[^a-z])on[a-z]+ *=") || string::contains($low, "script:")
+                || string::contains($low, "data:") || string::contains($low, "&#") || string::contains($low, "&colon")
+                || string::contains($low, "&tab") || string::contains($low, "&newline")
+                || string::contains($low, "srcdoc") || string::contains($low, "expression") || string::contains($low, "formaction");
+        }
+        if ($sus) {
+            $clean = $nm;
+            $flat = " " . wxr_flat($tag);
+            foreach (["href", "src", "alt", "title"] as $an) {
+                $av = wxr_attr($flat, $an);
+                if ($av == "") { continue; }
+                $avl = string::lower(string::trim($av));
+                $ok = true;
+                if ($an == "href" || $an == "src") {
+                    $ok = string::starts_with($avl, "http://") || string::starts_with($avl, "https://")
+                        || (string::starts_with($avl, "/") && !string::starts_with($avl, "//"));
+                }
+                if ($ok) { $clean = $clean . " " . $an . "=\"" . html::escape($av) . "\""; }
+            }
+        }
+        $out = $out . "<" . $clean . ">" . $rest;
+    }
+    return $out;
+}
+
+// ── tarih: "YYYY-MM-DD HH:MM:SS" → unix epoch (UTC; days_from_civil) ─────────
+function wxr_date_to_ts($s) {
+    $s = string::trim($s);
+    if (string::len($s) > 19) { return 0; }
+    if (!string::regex_match($s, "^[0-9]{4}-[0-9]{2}-[0-9]{2}( [0-9]{2}:[0-9]{2}:[0-9]{2})?$")) { return 0; }
+    if (string::starts_with($s, "0000")) { return 0; }
+    $dp = string::split($s, " ");
+    $d = string::split($dp[0], "-");
+    $y = type::to_int($d[0]); $m = type::to_int($d[1]); $day = type::to_int($d[2]);
+    $hh = 0; $mi = 0; $ss = 0;
+    if (count($dp) == 2) { $t = string::split($dp[1], ":"); $hh = type::to_int($t[0]); $mi = type::to_int($t[1]); $ss = type::to_int($t[2]); }
+    if ($m < 1 || $m > 12 || $day < 1 || $day > 31) { return 0; }
+    if ($m <= 2) { $y = $y - 1; }
+    $era = math::floor($y / 400);
+    $yoe = $y - $era * 400;
+    $mm = $m + 9; if ($m > 2) { $mm = $m - 3; }
+    $doy = math::floor((153 * $mm + 2) / 5) + $day - 1;
+    $doe = $yoe * 365 + math::floor($yoe / 4) - math::floor($yoe / 100) + $doy;
+    $days = $era * 146097 + $doe - 719468;
+    return type::to_int($days * 86400 + $hh * 3600 + $mi * 60 + $ss);
+}
+
+// ── slug ──────────────────────────────────────────────────────────────────────
+function wxr_slug_for($it) {
+    $s = string::lower(string::trim($it["post_name"]));
+    if (string::len($s) > 200) { $s = ""; }   // regex girdisi sınırlı; anormal uzun post_name → başlıktan üret
+    // WordPress Türkçe/Unicode post_name'i yüzde-kodlar (%c3%a7…) → başlıktan üret
+    if ($s == "" || string::contains($s, "%") || !string::regex_match($s, "^[a-z0-9-]+$")) {
+        $s = string::slugify($it["title"]);
+    }
+    if ($s == "" && $it["post_id"] > 0) { $s = "item-" . $it["post_id"]; }
+    return $s;
+}
+
+// ── içe aktarma ───────────────────────────────────────────────────────────────
+// $opts: lang, do_pages, do_posts, with_drafts, dry_run (bool)
+// Döner: ["rows" => [...ilk 20 {title,type,result,reason}], "counts" => [...{type,imported,skipped,errors}],
+//         "n_imported","n_skipped","n_errors","n_categories","n_tags","truncated","total","site"]
+function wxr_import($c, $doc, $opts) {
+    $lang = norm_lang($opts["lang"]);
+    $dry = $opts["dry_run"];
+    // ek görsel haritası: post_id → attachment_url
+    $att = array::new_assoc();
+    foreach ($doc["items"] as $a) {
+        if ($a["post_type"] == "attachment" && $a["attachment_url"] != "") {
+            $att = array::set($att, "" . $a["post_id"], $a["attachment_url"]);
+        }
+    }
+    $rows = []; $counts = array::new_assoc(); $type_cache = array::new_assoc();
+    $n_imp = 0; $n_skip = 0; $n_err = 0; $n_cat = 0; $n_tag = 0;
+    $cat_seen = array::new_assoc(); $tag_seen = array::new_assoc();
+    $seen_slugs = array::new_assoc();   // aynı dosya içinde tekrar eden slug (dry-run'da da tut)
+    foreach ($doc["items"] as $it) {
+        $pt = $it["post_type"];
+        if (string::len($pt) > 64) { $pt = string::substr($pt, 0, 64); }
+        if (string::len($it["title"]) > 300) { $it = array::set($it, "title", string::substr($it["title"], 0, 300)); }
+        $title = $it["title"]; if ($title == "") { $title = "(başlıksız #" . $it["post_id"] . ")"; }
+        if ($pt == "attachment" || $pt == "nav_menu_item" || $pt == "revision" || $pt == "custom_css"
+            || $pt == "customize_changeset" || $pt == "oembed_cache" || $pt == "user_request"
+            || string::starts_with($pt, "wp_")) {
+            continue;   // WP iç türleri — rapora bile girmez (gürültü)
+        }
+        // hedef modül
+        $target = $pt;
+        if ($pt == "post" && !$opts["do_posts"]) { $rows = wxr_row($rows, $title, $pt, "skipped", "yazılar seçili değil"); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue; }
+        if ($pt == "page" && !$opts["do_pages"]) { $rows = wxr_row($rows, $title, $pt, "skipped", "sayfalar seçili değil"); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue; }
+        $t = null;
+        if ($type_cache[$target] != null) { $t = $type_cache[$target]; }
+        else {
+            if (string::len($target) > 0 && string::len($target) <= 64 && string::regex_match($target, "^[a-z0-9_-]+$")) { $t = load_type($c, $target); }
+            if ($t != null) { $type_cache = array::set($type_cache, $target, $t); }
+        }
+        if ($t == null) { $rows = wxr_row($rows, $title, $pt, "skipped", "modül yok: " . $target); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue; }
+        // durum
+        $st = $it["status"];
+        $status = "draft";
+        if ($st == "publish") { $status = "published"; }
+        else {
+            if ($st == "trash" || $st == "auto-draft" || $st == "inherit") { $rows = wxr_row($rows, $title, $pt, "skipped", "durum: " . $st); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue; }
+            if (!$opts["with_drafts"]) { $rows = wxr_row($rows, $title, $pt, "skipped", "taslak (seçili değil)"); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue; }
+        }
+        // slug + idempotent kontrol
+        $slug = wxr_slug_for($it);
+        if ($slug == "") { $rows = wxr_row($rows, $title, $pt, "error", "slug üretilemedi"); $n_err = $n_err + 1; $counts = wxr_count($counts, $pt, "errors"); continue; }
+        $skey = $target . "/" . $lang . "/" . $slug;
+        if ($seen_slugs[$skey] != null || slug_taken($c, $target, $slug, 0, $lang)) {
+            $rows = wxr_row($rows, $title, $pt, "skipped", "slug zaten var: " . $slug); $n_skip = $n_skip + 1; $counts = wxr_count($counts, $pt, "skipped"); continue;
+        }
+        $seen_slugs = array::set($seen_slugs, $skey, true);
+        // kategori/etiket sayımı (modülde alan yoksa yalnız rapor)
+        foreach ($it["categories"] as $cn) { if ($cat_seen[$cn] == null) { $cat_seen = array::set($cat_seen, $cn, true); $n_cat = $n_cat + 1; } }
+        foreach ($it["tags"] as $tn) { if ($tag_seen[$tn] == null) { $tag_seen = array::set($tag_seen, $tn, true); $n_tag = $n_tag + 1; } }
+        // değerler
+        $values = wxr_values_for($t, $it, $att);
+        if ($dry) { $rows = wxr_row($rows, $title, $pt, "preview", $status . " → " . $target . "/" . $slug); $n_imp = $n_imp + 1; $counts = wxr_count($counts, $pt, "imported"); continue; }
+        try {
+            $id = save_content($c, $target, 0, $slug, $values, $status, $lang);
+            $ts = wxr_date_to_ts($it["post_date_gmt"]);
+            if ($ts == 0) { $ts = wxr_date_to_ts($it["post_date"]); }
+            if ($ts > 0) { db::exec($c, "UPDATE content SET created_at = ?, updated_at = ? WHERE id = ?", [$ts, $ts, $id]); }
+            $rows = wxr_row($rows, $title, $pt, "imported", $status . " → " . $target . "/" . $slug);
+            $n_imp = $n_imp + 1; $counts = wxr_count($counts, $pt, "imported");
+        } catch ($e) {
+            $rows = wxr_row($rows, $title, $pt, "error", "save failed");
+            $n_err = $n_err + 1; $counts = wxr_count($counts, $pt, "errors");
+        }
+    }
+    if (!$dry) { types_cache_bust(); }
+    $clist = [];
+    foreach (array::keys($counts) as $k) { $clist = array::push($clist, $counts[$k]); }
+    return ["rows" => $rows, "counts" => $clist, "n_imported" => $n_imp, "n_skipped" => $n_skip, "n_errors" => $n_err,
+            "n_categories" => $n_cat, "n_tags" => $n_tag, "truncated" => $doc["truncated"], "total" => $doc["total"], "site" => $doc["site"]];
+}
+function wxr_row($rows, $title, $type, $result, $reason) {
+    if (count($rows) >= 20) { return $rows; }
+    return array::push($rows, ["title" => $title, "type" => $type, "result" => $result, "reason" => $reason]);
+}
+function wxr_count($counts, $type, $key) {
+    $row = $counts[$type];
+    if ($row == null) { $row = ["type" => $type, "imported" => 0, "skipped" => 0, "errors" => 0]; }
+    $row = array::set($row, $key, $row[$key] + 1);
+    return array::set($counts, $type, $row);
+}
+// Modül alanlarına göre değer haritası: title her zaman; HTML içerik → blocks alanı
+// varsa tek "html" bloğu, yoksa body'ye hafif markdown; image ← _thumbnail_id;
+// category/excerpt alanları varsa doldur. Ek anahtar seo_title/seo_desc (with_seo yerine).
+function wxr_values_for($t, $it, $att) {
+    $fields = $t["fields"];
+    $values = array::new_assoc();
+    $blocks_field = ""; $has_body = false; $has_image = false; $has_category = false; $has_excerpt = false;
+    foreach ($fields as $f) {
+        if ($f["type"] == "blocks" && $blocks_field == "") { $blocks_field = $f["name"]; }
+        if ($f["name"] == "body") { $has_body = true; }
+        if ($f["name"] == "image" && $f["type"] == "image") { $has_image = true; }
+        if ($f["name"] == "category" && ($f["type"] == "text" || $f["type"] == "category")) { $has_category = true; }
+        if ($f["name"] == "excerpt" && ($f["type"] == "text" || $f["type"] == "textarea")) { $has_excerpt = true; }
+    }
+    $values = array::set($values, "title", $it["title"]);
+    $html = $it["content"];
+    if ($blocks_field != "") {
+        $blocks = [];
+        if (string::trim($html) != "") { $blocks = array::push($blocks, ["type" => "html", "data" => ["code" => wxr_sanitize_html($html)]]); }
+        $values = array::set($values, $blocks_field, json::encode($blocks));
+        if ($has_body) { $values = array::set($values, "body", ""); }
+    } else {
+        if ($has_body) { $values = array::set($values, "body", wxr_html_to_md($html)); }
+    }
+    if ($has_image && $it["thumbnail_id"] > 0) {
+        $u = $att["" . $it["thumbnail_id"]];
+        if ($u != null) { $values = array::set($values, "image", $u); }
+    }
+    if ($has_category && count($it["categories"]) > 0) { $values = array::set($values, "category", $it["categories"][0]); }
+    $ex = string::trim(wxr_unescape(html::strip($it["excerpt"])));
+    if ($has_excerpt) { $values = array::set($values, "excerpt", $ex); }
+    $values = array::set($values, "seo_title", "");
+    $values = array::set($values, "seo_desc", string::substr($ex, 0, 300));
+    return $values;
+}
