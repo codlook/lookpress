@@ -18,6 +18,8 @@ route("POST", "/admin/login", function() {
     $c = conn();
     $u = request::post("username");
     $p = request::post("password");
+    // Kullanıcı adı boşluk/büyük-harf toleranslı: mobil klavye "Admin " gönderebilir.
+    if ($u != null) { $u = string::lower(string::trim($u)); }
     // brute-force guard: 5 failures / 10 min per ip+username (src/security.lk)
     $lk = login_key($u);
     if (!login_allowed($lk)) { response::status(429); response::text("Too many attempts. Try again in 10 minutes."); return; }

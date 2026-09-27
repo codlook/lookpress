@@ -143,9 +143,23 @@ function security_headers() {
 }
 
 // ── middleware: her istekte başlıklar; kapsamlı POST'larda CSRF ───────────────
+// Açık demo kilidi: LOOKPRESS_LOCK_USERS=1 iken kullanıcı ve rol yönetimi salt-okunur
+// (şifre/rol değişimi, kullanıcı ekleme/silme, rol düzenleme kapalı). Herkese açık bir
+// demo hesabının şifresini kimse değiştiremesin diye.
+function users_locked($path) {
+    if (env("LOOKPRESS_LOCK_USERS", "0") != "1") { return false; }
+    if (string::starts_with($path, "/admin/users")) { return true; }
+    if (string::starts_with($path, "/admin/roles")) { return true; }
+    return false;
+}
 before_route(function() {
     security_headers();
     if (request::method() != "POST") { return; }
+    if (users_locked(request::path())) {
+        response::status(403);
+        response::text("Demo: user and role management is locked on this site.");
+        stop();
+    }
     if (!csrf_required(request::path())) { return; }
     if (csrf_verify()) { return; }
     response::status(403);
