@@ -44,6 +44,23 @@ function csrf_verify() {
 // henüz yok, token da yok; login'i login hız sınırı korur) + herkese açık form
 // gönderimi /forms/{key}. /admin/media/upload MUAF DEĞİL: yükleyici fetch'i
 // `_csrf` alanını FormData'ya ekler + X-CSRF-Token başlığı gönderir (layout.html).
+// Genel amaçlı sayaç-limit (audit LP-05/06/08): $bucket için $window saniyede en fazla
+// $max istek. true = izin var. cache:: süreç-içi bellektir → çok-süreçli kurulumda
+// limit süreç başınadır (sınırlı ama küresel değil); kaba kuvveti yine de keser.
+function throttle_hit($bucket, $max, $window) {
+    $k = "thr:" . $bucket;
+    $n = cache::get($k);
+    if ($n == null) { $n = 0; }
+    $n = type::to_int($n) + 1;
+    cache::set($k, $n, $window);
+    return $n <= $max;
+}
+// Basit e-posta biçim kontrolü (posta göndermeden önce; RFC tam uyumu değil).
+function email_looks_valid($e) {
+    if ($e == null) { return false; }
+    if (string::len($e) > 190) { return false; }
+    return string::regex_match($e, "^[^@ \\r\\n]+@[^@ \\r\\n]+\\.[^@ \\r\\n]+$");
+}
 function csrf_required($path) {
     if ($path == "/admin/login") { return false; }
     if (string::starts_with($path, "/admin/")) { return true; }

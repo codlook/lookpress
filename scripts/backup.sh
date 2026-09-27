@@ -15,6 +15,7 @@
 #
 # Secrets: DSN passwords are never printed and never passed on a command line.
 set -euo pipefail
+umask 077   # arşivler ve geçici dosyalar yalnız sahibine açık (audit LP-11)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -188,7 +189,7 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 have tar || die "tar not found"
-mkdir -p "$OUT_DIR"
+mkdir -p "$OUT_DIR"; chmod 700 "$OUT_DIR" 2>/dev/null || true
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/lookpress-backup.XXXXXX")"
 CONSISTENT="true"
 DB_METHOD=""

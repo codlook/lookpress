@@ -118,12 +118,24 @@ route("POST", "/forms/{key}", function() {
     // silently accept-and-drop (don't tell the bot it failed).
     $hp = request::post("website");
     if ($hp != null) { if ($hp != "") { return response::redirect("/forms/" . $key . "?sent=1"); } }
+    // Kötüye kullanım sınırı (audit LP-05): IP başına 10 dk'da en fazla 10 gönderim.
+    if (!throttle_hit("form:" . request::ip(), 10, 600)) {
+        response::status(429);
+        return response::text("Too many submissions. Try again in a few minutes.");
+    }
     $def = form_get($c, $key);
+    // Tanımsız form anahtarı yalnız eski /contact sayfası için kabul edilir; diğerleri 404
+    // (keyfi anahtarlarla tablo/admin listesi kirletilemesin).
+    if ($def == null && $key != "contact") {
+        response::status(404);
+        return response::text("No such form.");
+    }
     if ($def != null) {
-        // generic: store every defined field's value
+        // generic: store every defined field's value (alan başına 5000 karakter sınırı)
         $data = array::new_assoc();
         foreach ($def["fields"] as $f) {
             $val = request::post($f["name"]); if ($val == null) { $val = ""; }
+            $val = string::substr("" . $val, 0, 5000);
             $data = array::set($data, $f["name"], $val);
         }
         db::exec($c, "INSERT INTO form_submissions (form_key, data_json, created_at) VALUES (?, ?, ?)", [$key, json::encode($data), date::timestamp()]);

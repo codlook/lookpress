@@ -134,8 +134,11 @@ function member_page_profil($m, $error, $ok) {
 // hiç yoksa (commerce yüklü değil) boş liste.
 function member_orders($c, $m) {
     $rows = [];
+    // Yalnız üyenin KENDİ id'sine bağlı siparişler (audit LP-07). E-posta eşleşmesiyle
+    // listelemek, aynı adresle sonradan kayıt olan birine misafir siparişlerini ifşa
+    // ediyordu; e-posta sahipliği doğrulanmadığı için eşleşme güvenilir değil.
     try {
-        $rows = db::query($c, "SELECT id, total, status, created_at FROM orders WHERE email = ? ORDER BY id DESC LIMIT 100", [$m["email"]]);
+        $rows = db::query($c, "SELECT id, total, status, created_at FROM orders WHERE member_id = ? AND member_id > 0 ORDER BY id DESC LIMIT 100", [type::to_int($m["id"])]);
     } catch ($e) { $rows = []; }
     $items = [];
     foreach ($rows as $o) {
@@ -207,11 +210,19 @@ route("POST", "/hesap/{action}", function() {
     if ($action == "giris") {
         $email = member_norm_email(request::post("email"));
         $p = member_post("password");
+        // Kaba kuvvet sınırı (audit LP-06): ip+e-posta başına 5 hata / 10 dk — admin
+        // girişiyle aynı mekanizma (src/security.lk). PBKDF2 doğrulaması pahalıdır.
+        $lk = login_key("member:" . $email);
+        if (!login_allowed($lk)) {
+            response::status(429);
+            return member_form_giris($email, "Too many attempts. Try again in 10 minutes.");
+        }
         if ($email != "" && $p != "") {
             $rows = db::query($c, "SELECT id, password_hash, status FROM members WHERE email = ?", [$email]);
             if (count($rows) == 1) {
                 if ($rows[0]["status"] == "active") {
                     if (auth::verify($p, $rows[0]["password_hash"])) {
+                        login_reset($lk);
                         db::exec($c, "UPDATE members SET last_login = ? WHERE id = ?", [date::timestamp(), $rows[0]["id"]]);
                         member_login_session($rows[0]["id"]);
                         return response::redirect("/hesap/profil");
@@ -219,6 +230,7 @@ route("POST", "/hesap/{action}", function() {
                 }
             }
         }
+        login_failed($lk);
         // Tek genel mesaj: e-posta var/yok bilgisini sızdırma.
         return member_form_giris($email, "Invalid email or password.");
     }
@@ -246,8 +258,14 @@ route("POST", "/hesap/{action}", function() {
     }
     if ($action == "sifremi-unuttum") {
         $email = member_norm_email(request::post("email"));
-        // Her hata yutulur: yanıt e-posta var/yok'tan bağımsız hep aynı.
-        try { member_reset_request($c, $email); } catch ($e) { log::warn("password reset request failed: " . $e); }
+        // Posta bombardımanı sınırı (audit LP-06): e-posta başına 5 dk'da 1 bağlantı,
+        // IP başına 10 dk'da 5 istek. Sınır aşılınca da yanıt aynı (sızıntı yok).
+        $may = throttle_hit("reset-ip:" . request::ip(), 5, 600);
+        if ($may && $email != "" && cache::get("reset:" . $email) == null) {
+            cache::set("reset:" . $email, 1, 300);
+            // Her hata yutulur: yanıt e-posta var/yok'tan bağımsız hep aynı.
+            try { member_reset_request($c, $email); } catch ($e) { log::warn("password reset request failed: " . $e); }
+        }
         return response::redirect("/hesap/sifremi-unuttum?sent=1");
     }
     if ($action == "sifre-sifirla") {

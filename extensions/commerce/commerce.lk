@@ -242,10 +242,30 @@ route("POST", "/checkout", function() {
             return response::redirect("/cart");
         }
     }
+    // Kötüye kullanım sınırı (audit LP-08): IP başına 10 dk'da en fazla 10 sipariş.
+    if (!throttle_hit("checkout:" . request::ip(), 10, 600)) {
+        cart_msg_set("Çok fazla deneme yapıldı. Lütfen birkaç dakika sonra tekrar deneyin.");
+        return response::redirect("/cart");
+    }
     $email = request::post("email"); if ($email == null) { $email = ""; }
     $cust_name = request::post("cust_name"); if ($cust_name == null) { $cust_name = ""; }
     $address = request::post("address"); if ($address == null) { $address = ""; }
     $phone = request::post("phone"); if ($phone == null) { $phone = ""; }
+    $email = string::trim($email);
+    // Alan boyutları sınırlı (DB + posta gövdesi); e-posta biçimi doğrulanır.
+    $cust_name = string::substr(string::trim($cust_name), 0, 120);
+    $address = string::substr($address, 0, 1000);
+    $phone = string::substr(string::trim($phone), 0, 40);
+    if ($email != "" && !email_looks_valid($email)) {
+        cart_msg_set("Geçerli bir e-posta adresi girin.");
+        return response::redirect("/cart");
+    }
+    // Müşteri kopyası: site açık bildirim rölesine dönmesin diye IP başına 10 dk'da 3 posta.
+    // (İç kopya contact_email'e koşulsuz gider.) Giriş yapmış üyenin siparişi hesabına bağlanır.
+    $cust_mail = $email;
+    if ($cust_mail != "" && !throttle_hit("comail:" . request::ip(), 3, 600)) { $cust_mail = ""; }
+    session::start();
+    $member_id = type::to_int(session::get("member_id"));
     $subtotal = 0.0;
     foreach ($cart as $it) { $subtotal = $subtotal + type::to_float($it["price"]) * $it["qty"]; }
     $code = coupon_code();
@@ -255,7 +275,7 @@ route("POST", "/checkout", function() {
     $total = $subtotal - $disc;
     $applied = ""; if ($crow != null) { $applied = $code; }
     $ts = date::timestamp();
-    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'received', ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts]);
+    db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at, member_id) VALUES (?, ?, ?, ?, ?, ?, 'received', ?, ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts, $member_id]);
     $oid = db::last_id($c);
     foreach ($cart as $it) {
         db::exec($c, "INSERT INTO order_items (order_id, slug, title, price, qty, variant_name, variant_sku) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -267,7 +287,7 @@ route("POST", "/checkout", function() {
     session::start(); session::set("coupon", "");
     // Sipariş onayı e-postası (müşteri + contact_email kopyası). Posta hatası
     // checkout'u ASLA düşürmez — order_confirm_mail her şeyi yutar.
-    order_confirm_mail($oid, $email, $cust_name, $cart, $subtotal, $disc, $applied, $total);
+    order_confirm_mail($oid, $cust_mail, $cust_name, $cart, $subtotal, $disc, $applied, $total);
     return response::html(ext_view("commerce", "checkout.html", ["count" => $n, "order_id" => $oid, "total" => $total]));
 });
 // Sipariş özeti postası: kalemler (varyantlı), ara toplam / indirim / toplam, sipariş no.

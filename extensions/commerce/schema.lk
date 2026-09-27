@@ -31,6 +31,9 @@ function xp_migrate($c) {
     // idempotent ekle; tablo ASLA düşürülmez/yeniden yaratılmaz.
     commerce_ensure_col($c, "order_items", "variant_name", "VARCHAR(120)");
     commerce_ensure_col($c, "order_items", "variant_sku", "VARCHAR(80)");
+    // Sipariş ↔ üye bağı (audit LP-07): sipariş geçmişi e-posta eşleşmesiyle DEĞİL,
+    // giriş yapmış üyenin id'siyle listelenir. 0 = misafir siparişi.
+    commerce_ensure_col($c, "orders", "member_id", "INTEGER DEFAULT 0");
 }
 // SQLite'ta ADD COLUMN IF NOT EXISTS yok → PRAGMA table_info ile bak, yoksa ALTER.
 function commerce_ensure_col($c, $table, $col, $decl) {
