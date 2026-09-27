@@ -38,6 +38,11 @@ case "$DSN" in
   sqlite://*) DB_FILE="${DSN#sqlite://}" ;;
   *) echo "demo-reset supports SQLite only" >&2; exit 1 ;;
 esac
+# sqlite:////abs/path leaves "//abs/path": collapse the leading slashes to one.
+case "$DB_FILE" in
+  /*) DB_FILE="/$(printf '%s' "$DB_FILE" | sed 's#^/*##')" ;;
+  *) echo "relative database path, refusing: $DB_FILE" >&2; exit 1 ;;
+esac
 # The database must live inside the site root; refuse anything else.
 case "$DB_FILE" in
   "$ROOT"/*) : ;;
