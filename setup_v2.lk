@@ -328,7 +328,13 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
         ["name" => "mesaj",    "label" => "Mesaj",         "type" => "textarea", "required" => false]
     ]);
     print("=== seeded core demo content (en page) + example types (haber/duyuru/ekip) + demo forms (basvuru/iletisim/is-basvuru) ===\n");
+}
 
+// ── Dikey demo preset'leri (LOOKPRESS_PRESET = kurumsal | haber | eticaret) ────
+// Kapı yine LOOKPRESS_SEED=1. Varsayılan `kurumsal` (bugünkü seed, davranış aynı).
+// Hepsi slug bazında idempotent; preset değiştirmek = taze veritabanı (içerik
+// birikir, menü/ayar varsayılanları ilk yazanın kalır).
+function seed_preset_kurumsal($c) {
     // ── Wave 3: dolu kurumsal demo site (slug bazında idempotent) ─────────────
     // Sayfalar blok-kompoze edilebilsin: page tipine `icerik` (blocks) alanı — yoksa.
     ensure_type_field($c, "page", ["name" => "icerik", "type" => "blocks", "required" => false]);
@@ -460,6 +466,240 @@ if (env("LOOKPRESS_SEED", "0") == "1") {
     print("=== seeded corporate demo site (anasayfa/hakkimizda pages, slider, haber, duyuru, proje, etkinlik, galeri, video, ekip, settings, menu) ===\n");
 }
 
+// Haber gövdesi + kategori + görsel ile tek satırda haber seed'i.
+function seed_haber_item($c, $slug, $title, $cat, $img, $body) {
+    return seed_demo_item($c, "haber", $slug, "tr", $title, $body, ["image" => pic($img, 1200, 700), "category" => $cat]);
+}
+// 3 sütunluk "başlık + paragraf" bloğu (her iki dikey preset de kullanır).
+function seed_cols3($h1, $p1, $h2, $p2, $h3, $p3) {
+    return blk("columns", ["count" => "3", "cols" => [
+        ["blocks" => [blk("heading", ["level" => "3", "text" => $h1]), blk("paragraph", ["text" => $p1])]],
+        ["blocks" => [blk("heading", ["level" => "3", "text" => $h2]), blk("paragraph", ["text" => $p2])]],
+        ["blocks" => [blk("heading", ["level" => "3", "text" => $h3]), blk("paragraph", ["text" => $p3])]]
+    ]]);
+}
+
+// ── PRESET: haber (haber sitesi) ─────────────────────────────────────────────
+function seed_preset_haber($c) {
+    ensure_type_field($c, "page", ["name" => "icerik", "type" => "blocks", "required" => false]);
+    // Kategori alanı `category` adında — render_listing'in genel ?category= filtresi
+    // bu alanı okur. Değerler ASCII (URL'de güvenli); Türkçe etiket menüde.
+    ensure_type_field($c, "haber", ["name" => "category", "type" => "select", "required" => false,
+        "choices" => ["gundem", "ekonomi", "spor", "kultur", "teknoloji"]]);
+
+    // Haberler (12; en son eklenen listede en üstte)
+    seed_haber_item($c, "kis-saati-tartismasi-yeniden-gundemde", "Kış saati tartışması yeniden gündemde", "gundem", "lh-g1",
+        "Enerji tasarrufu raporunun açıklanmasının ardından kalıcı yaz saati uygulaması bir kez daha tartışmaya açıldı.\n\nUzmanlar, sabah saatlerindeki aydınlatma tüketiminin bölgeden bölgeye büyük fark gösterdiğine dikkat çekiyor.");
+    seed_haber_item($c, "buyuksehirde-yeni-metro-hatti-hizmete-girdi", "Büyükşehirde yeni metro hattı hizmete girdi", "gundem", "lh-g2",
+        "14 istasyonlu yeni hat ile iki yaka arasındaki yolculuk süresi 35 dakikaya indi. Hattın günde 400 bin yolcu taşıması bekleniyor.");
+    seed_haber_item($c, "okullarda-yeni-donem-hazirliklari-tamamlandi", "Okullarda yeni dönem hazırlıkları tamamlandı", "gundem", "lh-g3",
+        "Yeni eğitim döneminde 1.200 derslik daha kullanıma açılıyor. Ücretsiz ders kitaplarının dağıtımı ilk hafta içinde bitirilecek.");
+    seed_haber_item($c, "merkez-bankasi-faiz-kararini-acikladi", "Merkez Bankası faiz kararını açıkladı", "ekonomi", "lh-e1",
+        "Para Politikası Kurulu politika faizini sabit tuttu. Karar metninde enflasyon görünümündeki iyileşmeye vurgu yapıldı.\n\nPiyasalar kararı sakin karşıladı.");
+    seed_haber_item($c, "ihracat-eylulde-rekor-kirdi", "İhracat eylülde rekor kırdı", "ekonomi", "lh-e2",
+        "Eylül ayı ihracatı geçen yılın aynı dönemine göre yüzde 8 arttı. En yüksek artış otomotiv ve makine sektörlerinde görüldü.");
+    seed_haber_item($c, "kobilere-yeni-destek-paketi", "KOBİ'lere yeni destek paketi", "ekonomi", "lh-e3",
+        "Dijital dönüşüm yatırımı yapan küçük işletmelere düşük faizli kredi ve hibe desteği sağlanacak. Başvurular gelecek ay başlıyor.");
+    seed_haber_item($c, "derbide-gol-yagmuru", "Derbide gol yağmuru: 4-3", "spor", "lh-s1",
+        "Sezonun ilk derbisinde ev sahibi ekip, son dakikada bulduğu golle sahadan galip ayrıldı. Maçı 48 bin taraftar izledi.");
+    seed_haber_item($c, "milli-voleybolcular-finalde", "Milli voleybolcular finalde", "spor", "lh-s2",
+        "Yarı finalde rakibini 3-1 yenen milli takım, pazar günü altın madalya için sahaya çıkacak.");
+    seed_haber_item($c, "film-festivali-basliyor", "Film festivali 120 filmle başlıyor", "kultur", "lh-k1",
+        "Bu yıl 38 ülkeden 120 filmin gösterileceği festival, açılış filmiyle perdelerini açıyor. Biletler satışa çıktı.");
+    seed_haber_item($c, "antik-kentte-yeni-mozaik-bulundu", "Antik kentte yeni mozaik bulundu", "kultur", "lh-k2",
+        "Kazı ekibi, 1.800 yıllık olduğu tahmin edilen ve büyük ölçüde korunmuş bir taban mozaiği ortaya çıkardı.\n\nEserin gelecek yıl ziyarete açılması planlanıyor.");
+    seed_haber_item($c, "yerli-uydu-yorungeye-yerlesti", "Yerli uydu yörüngeye yerleşti", "teknoloji", "lh-t1",
+        "Gözlem uydusundan ilk sinyal alındı. Uydu, tarım ve afet yönetimi için yüksek çözünürlüklü görüntü sağlayacak.");
+    seed_haber_item($c, "yapay-zeka-yasa-tasarisi-mecliste", "Yapay zekâ yasa tasarısı Meclis'te", "teknoloji", "lh-t2",
+        "Tasarı, yüksek riskli yapay zekâ sistemleri için şeffaflık ve denetim yükümlülükleri getiriyor. Sektör temsilcileri görüşlerini komisyona sundu.");
+
+    // Videolar (3)
+    seed_demo_item($c, "video", "haftanin-ozeti", "tr", "Haftanın özeti", "",
+        ["url" => "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "description" => "Haftanın öne çıkan gelişmeleri 5 dakikada."]);
+    seed_demo_item($c, "video", "ekonomi-masasi", "tr", "Ekonomi masası", "",
+        ["url" => "https://youtu.be/jNQXAC9IVRw", "description" => "Faiz kararı ve piyasalara etkisi."]);
+    seed_demo_item($c, "video", "spor-studyosu", "tr", "Spor stüdyosu", "",
+        ["url" => "https://www.youtube.com/watch?v=9bZkp7q19f0", "description" => "Derbinin ardından yorumlar."]);
+
+    // Galeri (2 × 4 görsel)
+    seed_demo_item($c, "galeri", "gunun-kareleri", "tr", "Günün kareleri", "",
+        ["images" => json::encode([pic("lh-gal1a", 1200, 800), pic("lh-gal1b", 1200, 800), pic("lh-gal1c", 1200, 800), pic("lh-gal1d", 1200, 800)])]);
+    seed_demo_item($c, "galeri", "derbiden-kareler", "tr", "Derbiden kareler", "",
+        ["images" => json::encode([pic("lh-gal2a", 1200, 800), pic("lh-gal2b", 1200, 800), pic("lh-gal2c", 1200, 800), pic("lh-gal2d", 1200, 800)])]);
+
+    // Duyurular (3)
+    seed_demo_item($c, "duyuru", "mobil-uygulamamiz-yayinda", "tr", "Mobil uygulamamız yayında",
+        "Son dakika bildirimleri ve çevrimdışı okuma özelliğiyle mobil uygulamamız mağazalarda.", []);
+    seed_demo_item($c, "duyuru", "e-bulten-aboneligi", "tr", "E-bülten aboneliği başladı",
+        "Her sabah günün özetini e-posta kutunuza gönderiyoruz. İletişim formundan abone olabilirsiniz.", []);
+    seed_demo_item($c, "duyuru", "okur-temsilcisi-basvurulari", "tr", "Okur temsilcisi başvuruları",
+        "Düzeltme ve şikâyetleriniz için okur temsilcimize iletişim sayfasından ulaşabilirsiniz.", []);
+
+    // Ana sayfa: manşet → haberler → 3 sütun → videolar → iletişim formu
+    seed_demo_item($c, "page", "anasayfa", "tr", "Anasayfa", "", ["icerik" => json::encode([
+        blk("hero", ["title" => "Yapay zekâ yasa tasarısı Meclis'te", "subtitle" => "Yüksek riskli sistemlere şeffaflık ve denetim yükümlülüğü geliyor.", "image" => pic("lh-t2", 1600, 700), "button_label" => "Haberi oku", "button_url" => "/haber/yapay-zeka-yasa-tasarisi-mecliste", "align" => "left"]),
+        blk("heading", ["level" => "2", "text" => "Son haberler"]),
+        blk("listing", ["module" => "haber", "limit" => "6", "layout" => "cards", "show_image" => "1", "show_excerpt" => "1"]),
+        seed_cols3("Ekonomi", "Faiz, ihracat ve piyasalardan en güncel gelişmeler.",
+                   "Spor", "Maç sonuçları, transferler ve milli takımlar.",
+                   "Kültür", "Festivaller, sergiler ve arkeoloji haberleri."),
+        blk("heading", ["level" => "2", "text" => "Videolar"]),
+        blk("listing", ["module" => "video", "limit" => "3", "layout" => "cards", "show_image" => "0", "show_excerpt" => "1"]),
+        blk("form", ["form" => "iletisim", "title" => "Bize ulaşın"])
+    ])]);
+
+    seed_setting_default($c, "site_title", "Günlük Haber");
+    seed_setting_default($c, "seo_description", "Günlük Haber — gündem, ekonomi, spor, kültür ve teknolojiden güncel haberler.");
+    seed_setting_default($c, "contact_email", "editor@gunluk-haber.com");
+    seed_setting_default($c, "sabit_footer_text", "© Günlük Haber. Tüm hakları saklıdır.");
+    seed_menu_if_empty($c, "primary", [
+        ["label" => "Anasayfa",  "url" => "/"],
+        ["label" => "Gündem",    "url" => "/haber?category=gundem"],
+        ["label" => "Ekonomi",   "url" => "/haber?category=ekonomi"],
+        ["label" => "Videolar",  "url" => "/video"],
+        ["label" => "Galeri",    "url" => "/galeri"],
+        ["label" => "İletişim",  "url" => "/contact"]
+    ]);
+    seed_menu_if_empty($c, "footer", [
+        ["label" => "Tüm haberler", "url" => "/haber"],
+        ["label" => "Duyurular",    "url" => "/duyuru"],
+        ["label" => "İletişim",     "url" => "/contact"]
+    ]);
+    print("=== seeded preset haber (anasayfa page, 12 haber in 5 categories, 3 video, 2 galeri, 3 duyuru, settings, menu) ===\n");
+}
+
+// ── PRESET: eticaret (mağaza) ────────────────────────────────────────────────
+// İki aşama: (1) sayfa/slider/menü/ayar — varsayılan menüden ÖNCE; (2) ürünler —
+// commerce'in xp_seed'inden SONRA (ürün tipi, marka modülü ve kendi demo ürünleri
+// önce oluşsun; aksi hâlde commerce "ürün var" deyip kendi fixture'larını atlar).
+function seed_preset_eticaret($c) {
+    ensure_type_field($c, "page", ["name" => "icerik", "type" => "blocks", "required" => false]);
+    seed_demo_item($c, "slider", "kampanya-sezon", "tr", "Yeni sezon geldi", "",
+        ["image" => pic("ls-slide1", 1600, 700), "title" => "Yeni sezon geldi", "subtitle" => "Sonbahar koleksiyonunda yüzde 30'a varan indirim", "link" => "/product?category=giyim", "order" => "1"]);
+    seed_demo_item($c, "slider", "kampanya-kargo", "tr", "500 TL üzeri kargo bedava", "",
+        ["image" => pic("ls-slide2", 1600, 700), "title" => "500 TL üzeri kargo bedava", "subtitle" => "Aynı gün kargo, 14 gün içinde koşulsuz iade", "link" => "/product", "order" => "2"]);
+    seed_demo_item($c, "slider", "kampanya-kupon", "tr", "İlk siparişe yüzde 10 indirim", "",
+        ["image" => pic("ls-slide3", 1600, 700), "title" => "İlk siparişe yüzde 10 indirim", "subtitle" => "Sepette WELCOME10 kuponunu kullanın", "link" => "/duyuru", "order" => "3"]);
+
+    // Kampanyalar (duyuru modülü)
+    seed_demo_item($c, "duyuru", "sonbahar-indirimi", "tr", "Sonbahar indirimi başladı",
+        "Seçili giyim ve ayakkabı ürünlerinde yüzde 30'a varan indirim ay sonuna kadar geçerli.", []);
+    seed_demo_item($c, "duyuru", "hos-geldin-kuponu", "tr", "Hoş geldin kuponu: WELCOME10",
+        "İlk siparişinizde sepette **WELCOME10** kodunu girin, yüzde 10 indirim kazanın.", []);
+    seed_demo_item($c, "duyuru", "ucretsiz-kargo", "tr", "500 TL üzeri ücretsiz kargo",
+        "500 TL ve üzeri tüm siparişlerde kargo bizden. Saat 15:00'e kadar verilen siparişler aynı gün kargoda.", []);
+
+    seed_demo_item($c, "page", "anasayfa", "tr", "Anasayfa", "", ["icerik" => json::encode([
+        blk("hero", ["title" => "LookShop — tarzını keşfet", "subtitle" => "Giyim, ayakkabı ve aksesuarda yeni sezon ürünleri.", "image" => pic("ls-hero", 1600, 700), "button_label" => "Alışverişe başla", "button_url" => "/product", "align" => "center"]),
+        blk("slider", ["source" => "module", "module" => "slider", "limit" => "3"]),
+        blk("heading", ["level" => "2", "text" => "Öne çıkan ürünler"]),
+        blk("listing", ["module" => "product", "limit" => "8", "layout" => "cards", "show_image" => "1", "show_excerpt" => "0"]),
+        seed_cols3("Hızlı kargo", "Saat 15:00'e kadar verilen siparişler aynı gün kargoda.",
+                   "Kolay iade", "14 gün içinde koşulsuz iade ve değişim.",
+                   "Güvenli ödeme", "Tüm ödemeler şifreli bağlantı üzerinden alınır."),
+        blk("heading", ["level" => "2", "text" => "Markalar"]),
+        blk("listing", ["module" => "marka", "limit" => "6", "layout" => "cards", "show_image" => "1", "show_excerpt" => "1"])
+    ])]);
+
+    seed_setting_default($c, "site_title", "LookShop");
+    seed_setting_default($c, "seo_description", "LookShop — giyim, ayakkabı ve aksesuarda güvenli alışveriş, hızlı kargo.");
+    seed_setting_default($c, "contact_email", "destek@lookshop.com");
+    seed_setting_default($c, "sabit_footer_text", "© LookShop. Tüm hakları saklıdır.");
+    seed_menu_if_empty($c, "primary", [
+        ["label" => "Anasayfa",    "url" => "/"],
+        ["label" => "Ürünler",     "url" => "/product"],
+        ["label" => "Markalar",    "url" => "/marka"],
+        ["label" => "Kampanyalar", "url" => "/duyuru"],
+        ["label" => "İletişim",    "url" => "/contact"]
+    ]);
+    seed_menu_if_empty($c, "footer", [
+        ["label" => "Ürünler",     "url" => "/product"],
+        ["label" => "Kampanyalar", "url" => "/duyuru"],
+        ["label" => "İletişim",    "url" => "/contact"]
+    ]);
+}
+// Kategori satırı: slug yoksa ekle (kök, parent_id = 0).
+function seed_category_if_absent($c, $name, $slug) {
+    if (count(db::query($c, "SELECT id FROM categories WHERE slug = ?", [$slug])) > 0) { return; }
+    db::exec($c, "INSERT INTO categories (name, slug, parent_id) VALUES (?, ?, 0)", [$name, $slug]);
+}
+// Yayınlanmış bir içeriğin id'si (string; yoksa "") — marka ilişkisi id ile tutulur.
+function seed_content_id($c, $type, $slug) {
+    $r = db::query($c, "SELECT id FROM content WHERE type = ? AND slug = ? AND lang = 'tr'", [$type, $slug]);
+    if (count($r) == 0) { return ""; }
+    return "" . $r[0]["id"];
+}
+// Ürün seed'i — alan şekilleri commerce ile birebir: ozellikler [{"k","v"}],
+// varyantlar [{"ad","sku","fiyat","stok"}] (JSON string; boş liste yerine "").
+function seed_shop_product($c, $slug, $title, $body, $price, $sku, $cat, $brand, $attrs, $variants) {
+    $a = ""; if (count($attrs) > 0) { $a = json::encode($attrs); }
+    $v = ""; if (count($variants) > 0) { $v = json::encode($variants); }
+    return seed_demo_item($c, "product", $slug, "tr", $title, $body,
+        ["price" => $price, "sku" => $sku, "image" => pic("ls-" . $slug, 800, 800), "category" => $cat,
+         "marka" => $brand, "ozellikler" => $a, "varyantlar" => $v]);
+}
+function seed_preset_eticaret_products($c) {
+    if (count(db::query($c, "SELECT id FROM content_types WHERE slug = 'product'", [])) == 0) {
+        print("=== preset eticaret: product module missing (commerce extension not loaded) — products skipped ===\n");
+        return;
+    }
+    seed_category_if_absent($c, "Giyim", "giyim");
+    seed_category_if_absent($c, "Aksesuar", "aksesuar");
+    seed_category_if_absent($c, "Ayakkabı", "ayakkabi");
+
+    // Markalar (2) — `image` kart görseli için, `logo` modülün kendi alanı.
+    seed_demo_item($c, "marka", "anadolu-tekstil", "tr", "Anadolu Tekstil", "Yerli üretim, organik pamuklu giyim markası.",
+        ["logo" => pic("ls-marka1", 600, 400), "image" => pic("ls-marka1", 600, 400), "website" => "https://codlook.com", "description" => "Yerli üretim, organik pamuklu giyim markası."]);
+    seed_demo_item($c, "marka", "adim-ayakkabi", "tr", "Adım Ayakkabı", "El işçiliği deri ayakkabı ve aksesuar.",
+        ["logo" => pic("ls-marka2", 600, 400), "image" => pic("ls-marka2", 600, 400), "website" => "https://codlook.com", "description" => "El işçiliği deri ayakkabı ve aksesuar."]);
+    $b1 = seed_content_id($c, "marka", "anadolu-tekstil");
+    $b2 = seed_content_id($c, "marka", "adim-ayakkabi");
+
+    // Ürünler (8; 3 kategori)
+    seed_shop_product($c, "beyaz-gomlek", "Beyaz Gömlek", "Klasik kesim, ütü gerektirmeyen kumaş.", "349.90", "GM-WHT-010", "giyim", $b1,
+        [["k" => "Kumaş", "v" => "%100 pamuk"], ["k" => "Kesim", "v" => "Klasik"]],
+        [["ad" => "S", "sku" => "GM-WHT-010-S", "fiyat" => "", "stok" => "10"],
+         ["ad" => "M", "sku" => "GM-WHT-010-M", "fiyat" => "", "stok" => "14"],
+         ["ad" => "L", "sku" => "GM-WHT-010-L", "fiyat" => "", "stok" => "6"]]);
+    seed_shop_product($c, "yun-kazak", "Yün Kazak", "Yumuşak merinos yünü, bisiklet yaka.", "599.00", "KZ-GRY-011", "giyim", $b1,
+        [["k" => "Kumaş", "v" => "Merinos yünü"], ["k" => "Renk", "v" => "Gri"]],
+        [["ad" => "M", "sku" => "KZ-GRY-011-M", "fiyat" => "", "stok" => "7"],
+         ["ad" => "L", "sku" => "KZ-GRY-011-L", "fiyat" => "", "stok" => "4"],
+         ["ad" => "XL", "sku" => "KZ-GRY-011-XL", "fiyat" => "629.00", "stok" => "2"]]);
+    seed_shop_product($c, "kapusonlu-mont", "Kapüşonlu Mont", "Su itici kumaş, çıkarılabilir kapüşon.", "1299.00", "MN-BLK-012", "giyim", $b1,
+        [["k" => "Kumaş", "v" => "Su itici polyester"], ["k" => "Astar", "v" => "Polar"]], []);
+    seed_shop_product($c, "deri-sneaker", "Deri Sneaker", "Hakiki deri, hafif kauçuk taban.", "1499.00", "AY-WHT-020", "ayakkabi", $b2,
+        [["k" => "Malzeme", "v" => "Hakiki deri"], ["k" => "Taban", "v" => "Kauçuk"]],
+        [["ad" => "40", "sku" => "AY-WHT-020-40", "fiyat" => "", "stok" => "5"],
+         ["ad" => "42", "sku" => "AY-WHT-020-42", "fiyat" => "", "stok" => "8"],
+         ["ad" => "44", "sku" => "AY-WHT-020-44", "fiyat" => "", "stok" => "0"]]);
+    seed_shop_product($c, "suet-bot", "Süet Bot", "Bilek boy, kaymaz taban.", "1899.00", "AY-BRN-021", "ayakkabi", $b2,
+        [["k" => "Malzeme", "v" => "Süet"], ["k" => "Renk", "v" => "Kahverengi"]],
+        [["ad" => "41", "sku" => "AY-BRN-021-41", "fiyat" => "", "stok" => "3"],
+         ["ad" => "43", "sku" => "AY-BRN-021-43", "fiyat" => "", "stok" => "6"]]);
+    seed_shop_product($c, "kosu-ayakkabisi", "Koşu Ayakkabısı", "Nefes alan file, darbe emici taban.", "1199.00", "AY-BLU-022", "ayakkabi", $b2,
+        [["k" => "Malzeme", "v" => "File tekstil"], ["k" => "Ağırlık", "v" => "260 g"]], []);
+    seed_shop_product($c, "deri-kemer", "Deri Kemer", "Hakiki deri, metal toka.", "279.00", "AK-BLK-030", "aksesuar", $b2,
+        [["k" => "Malzeme", "v" => "Hakiki deri"], ["k" => "Genişlik", "v" => "3,5 cm"]],
+        [["ad" => "95 cm", "sku" => "AK-BLK-030-95", "fiyat" => "", "stok" => "12"],
+         ["ad" => "105 cm", "sku" => "AK-BLK-030-105", "fiyat" => "", "stok" => "9"]]);
+    seed_shop_product($c, "sirt-cantasi", "Sırt Çantası", "15 inç dizüstü bölmeli, su itici.", "749.00", "AK-GRN-031", "aksesuar", $b1,
+        [["k" => "Hacim", "v" => "22 litre"], ["k" => "Malzeme", "v" => "Su itici kanvas"]], []);
+    print("=== seeded preset eticaret (anasayfa page, 3 slider, 8 products in 3 categories, 2 marka, 3 duyuru, settings, menu) ===\n");
+}
+
+// Preset seçimi: bilinmeyen değer → kurumsal (uyarıyla).
+$lp_preset = env("LOOKPRESS_PRESET", "kurumsal");
+if ($lp_preset != "kurumsal" && $lp_preset != "haber" && $lp_preset != "eticaret") {
+    if (env("LOOKPRESS_SEED", "0") == "1") { print("=== unknown LOOKPRESS_PRESET '" . $lp_preset . "' — falling back to kurumsal ===\n"); }
+    $lp_preset = "kurumsal";
+}
+if (env("LOOKPRESS_SEED", "0") == "1") {
+    if ($lp_preset == "haber") { seed_preset_haber($c); }
+    if ($lp_preset == "eticaret") { seed_preset_eticaret($c); }
+    if ($lp_preset == "kurumsal") { seed_preset_kurumsal($c); }
+}
+
 // ── seed the primary navigation menu (idempotent) so the site header has links ─
 // (demo seed above may already have written the corporate menu — then this is a no-op)
 seed_menu_if_empty($c, "primary", [
@@ -474,6 +714,8 @@ xp_seed($c);
 // (no-op when config_json is already set; no-op when the type does not exist).
 ensure_module_config($c, "ekip",    mod_cfg("kurumsal",  "👥", "Ekip Üyesi", "Ekip", 30, true, ["title", "status", "updated_at"], ["status"]));
 ensure_module_config($c, "product", mod_cfg("ecommerce", "🛒", "Ürün", "Ürünler", 10, true, ["image", "title", "price", "category", "status"], ["status", "category"]));
+// eticaret preset'inin ürün aşaması — commerce seed'inden SONRA (yukarıdaki nota bakın).
+if (env("LOOKPRESS_SEED", "0") == "1" && $lp_preset == "eticaret") { seed_preset_eticaret_products($c); }
 
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {

@@ -77,7 +77,7 @@ mirroring `docker/entrypoint.sh`, then start:
 ```bash
 sudo -u "$U" bash -c "cd '$D' && DB_DSN=... /opt/look/lk setup.lk migrate"
 sudo -u "$U" bash -c "cd '$D' && DB_DSN=... LOOKPRESS_SEED=1 /opt/look/lk setup.lk seed"
-sudo -u "$U" bash -c "cd '$D' && DB_DSN=... ADMIN_PASSWORD=... LOOKPRESS_SEED=1 /opt/look/lk setup_v2.lk"
+sudo -u "$U" bash -c "cd '$D' && DB_DSN=... ADMIN_PASSWORD=... LOOKPRESS_SEED=1 LOOKPRESS_PRESET=kurumsal /opt/look/lk setup_v2.lk"
 systemctl daemon-reload && systemctl start look-<domain-dashed>
 ```
 
