@@ -409,7 +409,10 @@
    grid.innerHTML='';
    items.forEach(function(it){
     var d=document.createElement('div');d.className='mp-item';
-    d.innerHTML='<img src="'+it.url+'" alt=""><span>'+(it.original||it.name)+'</span>';
+    // Dosya adı istemciden gelir; innerHTML yerine düğüm + textContent (audit LP-14).
+    var im=document.createElement('img');im.src=it.url;im.alt='';
+    var sp=document.createElement('span');sp.textContent=it.original||it.name;
+    d.appendChild(im);d.appendChild(sp);
     d.addEventListener('click',function(){pick(it.url);});
     grid.appendChild(d);
    });

@@ -104,8 +104,10 @@ M_CONSISTENT="$(manifest_get consistent)"
 [ -f "$WORK/$M_DBFILE" ] || die "manifest names '$M_DBFILE' but it is not in the archive"
 [ -f "$WORK/uploads.tar.gz" ] || die "uploads.tar.gz missing from archive"
 if [ -f "$WORK/SHA256SUMS" ]; then
-  if have sha256sum; then (cd "$WORK" && sha256sum -c --quiet SHA256SUMS) || die "checksum mismatch — archive is corrupt"
-  elif have shasum;    then (cd "$WORK" && shasum -a 256 -c --quiet SHA256SUMS) || die "checksum mismatch — archive is corrupt"
+  # No --quiet: BusyBox sha256sum (Alpine) rejects it and the usage error would be
+  # reported as a corrupt archive. Plain -c works on GNU coreutils and BusyBox alike.
+  if have sha256sum; then (cd "$WORK" && sha256sum -c SHA256SUMS >/dev/null 2>&1) || die "checksum mismatch — archive is corrupt"
+  elif have shasum;    then (cd "$WORK" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1) || die "checksum mismatch — archive is corrupt"
   else warn "no sha256sum/shasum: skipping checksum verification"; fi
   log "checksums OK"
 else
@@ -144,7 +146,14 @@ fi
 DSN_SCHEME="${DSN%%://*}"; DSN_REST="${DSN#*://}"
 DSN_USER=""; DSN_PASS=""; DSN_HOST=""; DSN_PORT=""; DSN_DB=""
 case "$DSN_SCHEME" in
-  sqlite|sqlite3) ENGINE=sqlite; DSN_DB="${DSN_REST%%\?*}" ;;
+  sqlite|sqlite3)
+    ENGINE=sqlite; DSN_DB="${DSN_REST%%\?*}"
+    # sqlite:////abs/path leaves "//abs/path": collapse the leading slashes to one
+    # (same normalisation as backup.sh).
+    case "$DSN_DB" in
+      //*) DSN_DB="/$(printf '%s' "$DSN_DB" | sed 's#^/*##')" ;;
+    esac
+    ;;
   mysql|mariadb) ENGINE=mysql ;;
   postgres|postgresql|pgsql) ENGINE=postgres ;;
   *) die "unsupported DSN scheme '$DSN_SCHEME'" ;;

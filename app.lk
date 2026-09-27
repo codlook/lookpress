@@ -40,6 +40,10 @@ if (env("ADMIN_PASSWORD", "") == "") {
 }
 
 // ── configuration (constants the whole app agrees on) ────────────────────────
+// A well-known development password must never reach an exposed instance (audit LP-09).
+if (env("ADMIN_PASSWORD", "") == "lookpress-dev") {
+    log::warn("ADMIN_PASSWORD is the well-known development value. Change it before exposing this instance.");
+}
 use "config/config.lk";
 
 // ── core seams + domain modules (functions only; no routes) ──────────────────

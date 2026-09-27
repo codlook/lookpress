@@ -228,12 +228,53 @@ route("POST", "/cart/update", function() {
     cart_save($new);
     return response::redirect("/cart");
 });
+// Sepet satırlarını güncel ürün verisiyle tazeler (audit LP-20): fiyat sepete eklenirken
+// anlık kopyalanıyordu; sonradan zam gelen ya da yayından kalkan ürün eski fiyatla /
+// hiç satılmıyorken sipariş edilebiliyordu. Döner: {cart, changed, gone}.
+function cart_refresh($c, $cart) {
+    $out = []; $changed = false; $gone = "";
+    foreach ($cart as $it) {
+        $rows = product_published_rows($c, $it["slug"]);
+        if (count($rows) == 0) { if ($gone == "") { $gone = "" . $it["title"]; } continue; }
+        $vals = json::decode($rows[0]["fields_json"]);
+        $price = "0";
+        $variants = [];
+        if ($vals != null) {
+            $pv = $vals["price"];
+            if ($pv != null) { $price = "" . $pv; }
+            $variants = product_variants($vals);
+        }
+        if (count($variants) > 0) {
+            $v = variant_find($variants, cart_line_variant($it));
+            if ($v == null) { if ($gone == "") { $gone = "" . $it["title"]; } continue; }
+            $vp = cm_str($v, "fiyat", "");
+            if ($vp != "") { $price = $vp; }
+        }
+        if (type::to_float($price) != type::to_float($it["price"])) { $it["price"] = $price; $changed = true; }
+        $out = array::push($out, $it);
+    }
+    return ["cart" => $out, "changed" => $changed, "gone" => $gone];
+}
 route("POST", "/checkout", function() {
     // Demo checkout: no payment yet (roadmap Phase A). Persists a real order + line
     // items, clears the cart, confirms — the WooCommerce "order record" half.
     $c = conn();
     $cart = cart_get();
     if (count($cart) == 0) { return response::redirect("/cart"); }
+    // Fiyat ve yayın durumu yeniden okunur; değiştiyse sipariş alınmaz, müşteri güncel
+    // sepeti görüp tekrar onaylar.
+    $fr = cart_refresh($c, $cart);
+    if ($fr["gone"] != "") {
+        cart_save($fr["cart"]);
+        cart_msg_set("Ürün artık satışta değil ve sepetten çıkarıldı: " . $fr["gone"]);
+        return response::redirect("/cart");
+    }
+    if ($fr["changed"]) {
+        cart_save($fr["cart"]);
+        cart_msg_set("Sepetinizdeki bazı fiyatlar güncellendi. Lütfen kontrol edip tekrar onaylayın.");
+        return response::redirect("/cart");
+    }
+    $cart = $fr["cart"];
     // Son stok kontrolü (sepete eklendikten sonra stok değişmiş olabilir).
     foreach ($cart as $it) {
         $stock = cart_line_stock($c, $it["slug"], cart_line_variant($it));

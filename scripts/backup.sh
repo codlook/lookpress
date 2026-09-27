@@ -149,6 +149,12 @@ case "$DSN_SCHEME" in
     ENGINE="sqlite"
     DSN_DB="${DSN_REST%%\?*}"
     # sqlite:///abs/path -> "/abs/path"; sqlite://rel.db -> "rel.db" (relative to app root)
+    # sqlite:////abs/path (the form LOOK itself logs and Plesk installs use) leaves
+    # "//abs/path": collapse the leading slashes to one, otherwise "file:<path>" is read
+    # as a URI with an authority and the snapshot fails.
+    case "$DSN_DB" in
+      //*) DSN_DB="/$(printf '%s' "$DSN_DB" | sed 's#^/*##')" ;;
+    esac
     ;;
   mysql|mariadb)
     ENGINE="mysql" ;;

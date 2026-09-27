@@ -198,7 +198,13 @@ function search_like_excerpt($plain, $q) {
     if ($plain == "") { return ""; }
     $lp = string::lower($plain); $lq = string::lower($q);
     $i = -1;
-    if (string::len($lp) == string::len($plain)) { $i = string::index_of($lp, $lq); }
+    // string::index_of BAYT ofseti, string::substr KOD-NOKTASI ofseti kullanır; Türkçe
+    // metinde ikisini karıştırmak vurguyu kaydırır. Eşleşmeden önceki parçanın kod-noktası
+    // uzunluğu doğru indekstir.
+    if (string::len($lp) == string::len($plain)) {
+        $sp = string::split($lp, $lq);
+        if (count($sp) > 1) { $i = string::len($sp[0]); }
+    }
     if ($i < 0) {
         $s = string::substr($plain, 0, 160);
         if (string::len($plain) > 160) { $s = $s . "…"; }
