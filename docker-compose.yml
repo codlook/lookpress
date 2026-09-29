@@ -27,7 +27,9 @@ services:
       # Admin password. Explicit dev value here (NOT a hidden code default) —
       # override it: copy .env.example to .env and set ADMIN_PASSWORD, or export it.
       # Unset => /admin login is disabled (fail-loud), never a "changeme" backdoor.
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-lookpress-dev}
+      # No default: compose refuses to start until a password is chosen, so an instance
+      # can never go live with a well-known admin password.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is not set. Copy .env.example to .env and choose a password}
     restart: unless-stopped
 
 volumes:

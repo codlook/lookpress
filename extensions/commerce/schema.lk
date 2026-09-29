@@ -90,6 +90,10 @@ function commerce_ensure_product_fields($c) {
         $defs = array::push($defs, ["name" => "marka", "label" => "Marka", "type" => "relation", "to" => "marka", "required" => false]);
         $changed = true;
     }
+    if ($have["stok"] == null) {
+        $defs = array::push($defs, ["name" => "stok", "label" => "Stok (varyantsız ürün; boş = takip yok)", "type" => "int", "required" => false]);
+        $changed = true;
+    }
     if ($have["ozellikler"] == null) {
         $defs = array::push($defs, ["name" => "ozellikler", "label" => "Özellikler", "type" => "attributes", "required" => false]);
         $changed = true;

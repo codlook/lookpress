@@ -1,7 +1,7 @@
 {#extends "views/themes/default/layout"}
 {#block "content"}
 <div class="section-head" style="margin-top:0"><h2>Hesabım</h2><a class="more" href="/hesap/siparisler">Siparişlerim &rarr;</a></div>
-<p class="muted">{$email} &middot; <a href="/hesap/cikis">Çıkış yap</a></p>
+<p class="muted">{$email} &middot; <form method="post" action="/hesap/cikis" style="display:inline">{!$csrf}<button type="submit" style="background:none;border:0;cursor:pointer;font:inherit;padding:0;color:inherit;text-decoration:underline">Çıkış yap</button></form></p>
 {#if $has_error}<p class="error">{$error}</p>{/if}
 {#if $has_ok}<p class="sent-ok">{$ok}</p>{/if}
 

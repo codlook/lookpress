@@ -16,8 +16,11 @@ use html;
 // output through the `sanitize` module — regex rendering is best-effort.
 
 function markdown__descheme($html) {
-    $h = string::regex_replace($html, "(href|src)=\"[ ]*(javascript|data|vbscript):", "$1=\"#blocked:");
-    $h = string::regex_replace($h, "(href|src)=\"[ ]*(JAVASCRIPT|DATA|VBSCRIPT):", "$1=\"#blocked:");
+    // Allow-list. The previous deny-list matched only all-lowercase / all-uppercase
+    // scheme names and only spaces before them, so "JaVaScRiPt:", a leading tab and a
+    // tab inside the scheme all passed. A scheme-like prefix (text before the first
+    // ":" with no "/", "?" or "#" in it) is kept only for http(s), mailto and tel.
+    $h = string::regex_replace($html, "(href|src)=\"(?!([Hh][Tt][Tt][Pp][Ss]?://|[Mm][Aa][Ii][Ll][Tt][Oo]:|[Tt][Ee][Ll]:))([^\":/?#]*:[^\"]*)\"", "$1=\"#blocked\"");
     return $h;
 }
 

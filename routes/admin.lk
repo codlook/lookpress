@@ -43,7 +43,7 @@ route("POST", "/admin/login", function() {
     login_failed($lk);
     return response::html(admin_view("login.html", ["error" => "Kullanıcı adı ya da şifre hatalı."]));
 });
-route("GET", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
+route("POST", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
 
 // Admin dashboard: core content stats + the type list. Extensions inject their own
 // stat tiles ("admin.dashboard.stats") and panels ("admin.dashboard.panels") — the
@@ -378,7 +378,9 @@ route("GET", "/admin/type/{type}/history/{id}", function() {
 route("GET", "/api/{type}", function() {
     $c = conn();
     $t = load_type($c, request::param("type"));
-    if ($t == null) { return response::status(404, "{\"error\":\"no such type\"}"); }
+    // public:false modüller (slider, iç modüller) sayfa olarak sunulmuyor ama API'den
+    // kimliksiz okunabiliyordu; API de aynı bayrağa uyar.
+    if ($t == null || !$t["config"]["public"]) { return response::status(404, "{\"error\":\"no such type\"}"); }
     $per = type::to_int(request::get("limit") ?? "20"); if ($per < 1) { $per = 20; } if ($per > 100) { $per = 100; }
     $page = type::to_int(request::get("page") ?? "1"); if ($page < 1) { $page = 1; }
     $q = string::trim(request::get("q") ?? "");
@@ -676,6 +678,7 @@ route("POST", "/admin/users/{id}/{action}", function() {
                 return response::status(400, "Son admin rolü düşürülemez (kilitlenme koruması).");
             }
             db::exec($c, "UPDATE users SET role = ? WHERE id = ?", [$role, $id]);
+            role_cache_bust($id);
         }
         return response::redirect("/admin/users");
     }
@@ -698,6 +701,7 @@ route("POST", "/admin/users/{id}/{action}", function() {
                 return response::status(400, "Son admin silinemez (kilitlenme koruması).");
             }
             db::exec($c, "DELETE FROM users WHERE id = ?", [$id]);
+            role_cache_bust($id);
         }
         return response::redirect("/admin/users");
     }
@@ -774,7 +778,7 @@ route("POST", "/admin/roles/{id}/{action}", function() {
         $r = db::query($c, "SELECT name FROM roles WHERE id = ?", [$id]);
         // audit LP-02: kişi kendi rolünün yetkilerini genişletemez (süper hariç).
         session::start();
-        if (count($r) == 1 && $r[0]["name"] == session::get("role") && !is_super()) { return response::status(403, "Yetkiniz yok."); }
+        if (count($r) == 1 && $r[0]["name"] == current_role() && !is_super()) { return response::status(403, "Yetkiniz yok."); }
         if (count($r) == 1 && $r[0]["name"] != "admin") {
             db::exec($c, "UPDATE roles SET perms = ? WHERE id = ?", [json::encode(collect_perms()), $id]);
         }
@@ -837,7 +841,7 @@ route("POST", "/admin/menu", function() {
         // üretir ve çöp kayıt yazılırdı — önce null kontrolü.
         $lbl = request::post("label_" . $idx); if ($lbl == null) { $lbl = ""; }
         $url = request::post("url_" . $idx);   if ($url == null) { $url = ""; }
-        $lbl = string::trim($lbl); $url = string::trim($url);
+        $lbl = string::trim($lbl); $url = safe_url(string::trim($url));
         if ($lbl != "" && $url != "") { $items = array::push($items, ["label" => $lbl, "url" => $url]); }
     }
     $ij = json::encode($items);
@@ -906,6 +910,9 @@ route("POST", "/admin/settings", function() {
     // Wave 2 bölümleri — tek form, tüm alanlar her kayıtta gelir (sekmeler CSS/JS ile).
     // analytics_head / robots_extra HAM saklanır (yalnız güvenilir admin; şablon {!} basar).
     foreach (settings_text_keys() as $k) {
+        // analytics_head ham HTML olarak her ziyaretçiye basılır: "settings" yetmez,
+        // ham HTML yetkisi ("html") de gerekir. Yetki yoksa mevcut değer korunur.
+        if ($k == "analytics_head" && !can("html")) { continue; }
         $v = request::post($k); if ($v == null) { $v = ""; }
         setting_set($c, $k, string::trim($v));
     }

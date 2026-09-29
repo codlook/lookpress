@@ -19,11 +19,29 @@ function all_permissions() {
 }
 
 // Does the current (logged-in) user hold $perm? admin role = always yes.
+// Oturumdaki kullanıcının GÜNCEL rolü veritabanından okunur. Rol oturumda saklanınca
+// yetki düşürme ve kullanıcı silme mevcut oturumları etkilemiyordu (oturum bitene
+// kadar eski yetkiler geçerliydi). 2 sn'lik önbellek istek içi tekrarları karşılar;
+// rol değişince/silinince role_cache_bust ile hemen düşürülür. "" = kullanıcı yok.
+function current_role() {
+    session::start();
+    $uid = session::get("uid");
+    if ($uid == null || "" . $uid == "") { return ""; }
+    $k = "urole:" . $uid;
+    $r = cache::get($k);
+    if ($r != null) { return "" . $r; }
+    $rows = db::query(conn(), "SELECT role FROM users WHERE id = ?", [type::to_int($uid)]);
+    $role = "";
+    if (count($rows) == 1) { $role = "" . $rows[0]["role"]; }
+    if ($role != "") { cache::set($k, $role, 2); }
+    return $role;
+}
+function role_cache_bust($uid) { cache::delete("urole:" . $uid); }
 function can($perm) {
     session::start();
     if (session::get("uid") == null) { return false; }
-    $role = session::get("role");
-    if ($role == null) { return false; }
+    $role = current_role();
+    if ($role == "") { return false; }
     if ($role == "admin") { return true; }               // superuser
     $rows = db::query(conn(), "SELECT perms FROM roles WHERE name = ?", [$role]);
     if (count($rows) == 0) { return false; }

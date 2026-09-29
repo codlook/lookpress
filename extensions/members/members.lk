@@ -154,10 +154,9 @@ route("GET", "/hesap/{action}", function() {
     $c = conn();
     members_init($c);
     $action = request::param("action");
-    if ($action == "cikis") {
-        session::start(); session::set("member_id", ""); session::regenerate();
-        return response::redirect("/");
-    }
+    // Çıkış yalnız POST ile (CSRF korumalı): GET ile çıkış, başka bir sitedeki
+    // <img src=/hesap/cikis> ile zorla yaptırılabiliyordu.
+    if ($action == "cikis") { return response::redirect("/hesap/profil"); }
     if ($action == "giris") {
         if (member_current($c) != null) { return response::redirect("/hesap/profil"); }
         return member_form_giris("", "");
@@ -194,6 +193,10 @@ route("POST", "/hesap/{action}", function() {
     $c = conn();
     members_init($c);
     $action = request::param("action");
+    if ($action == "cikis") {
+        session::start(); session::set("member_id", ""); session::regenerate();
+        return response::redirect("/");
+    }
     if ($action == "kayit") {
         $email = member_norm_email(request::post("email"));
         $name = string::trim(member_post("name"));

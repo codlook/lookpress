@@ -243,3 +243,9 @@ for the drill.
 * `refusing to restore without --yes` — cron/CI context; add `--yes` deliberately.
 * Windows / Git Bash: the scripts convert host paths and disable MSYS path
   rewriting for docker themselves; run `scripts/backup.ps1` or `bash scripts/backup.sh`.
+
+## Only restore archives you created
+
+`restore.sh` verifies the checksums stored inside the archive, which detects damage but
+not a deliberately crafted archive. Restore only archives produced by your own
+`backup.sh` runs and kept where others cannot replace them.

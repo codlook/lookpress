@@ -70,7 +70,16 @@ function variant_stock($variant) {
 }
 // Sepet satırı için mevcut stok: varyantsız → -1 (sınırsız); varyant bulunamazsa 0.
 function cart_line_stock($c, $slug, $sku) {
-    if ($sku == "") { return -1; }
+    if ($sku == "") {
+        // Varyantsız ürün: ürünün kendi "stok" alanı (boş = stok takibi yok → -1).
+        $pr = product_published_rows($c, $slug);
+        if (count($pr) == 0) { return 0; }
+        $pv = json::decode($pr[0]["fields_json"]);
+        if ($pv == null) { return -1; }
+        $ps = $pv["stok"];
+        if ($ps == null || "" . $ps == "") { return -1; }
+        return type::to_int($ps);
+    }
     $rows = product_published_rows($c, $slug);
     if (count($rows) == 0) { return 0; }
     $v = variant_find(product_variants(json::decode($rows[0]["fields_json"])), $sku);
@@ -80,7 +89,20 @@ function cart_line_stock($c, $slug, $sku) {
 // Varyant stoğunu düş (stok boşsa sınırsız → dokunma). Yayınlanmış revizyonun fields_json'ı
 // yerinde güncellenir (stok = canlı veri, içerik sürümü değil). Tabloya ASLA yeni sütun/satır yok.
 function variant_stock_decrement($c, $slug, $sku, $qty) {
-    if ($sku == "") { return; }
+    if ($sku == "") {
+        // Varyantsız ürün: "stok" alanı tanımlıysa düşülür (her dil satırında).
+        foreach (product_published_rows($c, $slug) as $prow) {
+            $pvals = json::decode($prow["fields_json"]);
+            if ($pvals == null) { continue; }
+            $ps = $pvals["stok"];
+            if ($ps == null || "" . $ps == "") { continue; }
+            $pn = type::to_int($ps) - $qty;
+            if ($pn < 0) { $pn = 0; }
+            $pvals["stok"] = "" . $pn;
+            db::exec($c, "UPDATE revisions SET fields_json = ? WHERE id = ?", [json::encode($pvals), $prow["rid"]]);
+        }
+        return;
+    }
     foreach (product_published_rows($c, $slug) as $row) {
         $vals = json::decode($row["fields_json"]);
         if ($vals == null) { continue; }
@@ -167,6 +189,10 @@ route("POST", "/cart/add", function() {
     if ($variant != null) {
         $stock = variant_stock($variant);
         if ($stock >= 0 && $stock <= $have) { cart_msg_set("Bu varyant için yeterli stok yok."); return response::redirect("/cart"); }
+    }
+    if ($variant == null) {
+        $pstock = cart_line_stock($c, $slug, "");
+        if ($pstock >= 0 && $pstock <= $have) { cart_msg_set("Bu ürün için yeterli stok yok."); return response::redirect("/cart"); }
     }
     $new = []; $found = false;
     foreach ($cart as $it) {
@@ -316,6 +342,20 @@ route("POST", "/checkout", function() {
     $total = $subtotal - $disc;
     $applied = ""; if ($crow != null) { $applied = $code; }
     $ts = date::timestamp();
+    // Stok kontrolü + sipariş yazımı + stok düşümü TEK transaction'da: db::begin SQLite'ta
+    // BEGIN IMMEDIATE açar, eşzamanlı iki checkout sıraya girer ve ikincisi güncel stoğu
+    // okur. Önceki hali stoğu okuyup sonra düşüyordu; iki istek aynı stoğu satabiliyordu.
+    $oid = 0;
+    db::begin($c);
+    foreach ($cart as $it) {
+        $st = cart_line_stock($c, $it["slug"], cart_line_variant($it));
+        if ($st >= 0 && type::to_int($it["qty"]) > $st) {
+            db::rollback($c);
+            cart_msg_set("Stok yetersiz: " . $it["title"] . " " . cm_str($it, "variant_name", ""));
+            return response::redirect("/cart");
+        }
+    }
+    try {
     db::exec($c, "INSERT INTO orders (email, cust_name, address, phone, coupon, total, status, created_at, member_id) VALUES (?, ?, ?, ?, ?, ?, 'received', ?, ?)", [$email, $cust_name, $address, $phone, $applied, "" . $total, $ts, $member_id]);
     $oid = db::last_id($c);
     foreach ($cart as $it) {
@@ -323,6 +363,13 @@ route("POST", "/checkout", function() {
             [$oid, $it["slug"], $it["title"], "" . $it["price"], $it["qty"], cm_str($it, "variant_name", ""), cart_line_variant($it)]);
         variant_stock_decrement($c, $it["slug"], cart_line_variant($it), type::to_int($it["qty"]));
     }
+    } catch ($e) {
+        try { db::rollback($c); } catch ($e2) { $oid = 0; }
+        log::warn("checkout failed: " . $e);
+        cart_msg_set("Sipariş kaydedilemedi. Lütfen tekrar deneyin.");
+        return response::redirect("/cart");
+    }
+    db::commit($c);
     $n = count($cart);
     cart_save([]);
     session::start(); session::set("coupon", "");

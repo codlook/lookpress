@@ -37,7 +37,7 @@ function csrf_verify() {
     $sent = request::post("_csrf");
     if ($sent == null || $sent == "") { $sent = request::header("X-CSRF-Token"); }
     if ($sent == null || $sent == "") { return false; }
-    return $sent == $t;
+    return crypto::constant_compare("" . $sent, "" . $t);
 }
 
 // Bu POST yolu CSRF doğrulaması ister mi? Kapsam: /admin/* (login hariç — oturum
@@ -101,18 +101,49 @@ function login_key($username) {
     if ($username == null) { $username = ""; }
     return "login:" . $ip . ":" . string::lower(string::trim($username));
 }
+// Giriş sayaçları VERİTABANINDA tutulur: cache:: süreç-içi olduğu için 4 worker'da
+// gerçek sınır 5 değil 20 denemeydi. Tablo süreç başına bir kez (cache bayrağıyla)
+// oluşturulur; yalnız başarısız girişte yazılır.
+function throttle_db_init($c) {
+    if (cache::get("thr:dbinit") != null) { return; }
+    db::exec($c, "CREATE TABLE IF NOT EXISTS throttle (bucket VARCHAR(200) PRIMARY KEY, n INTEGER DEFAULT 0, expires INTEGER DEFAULT 0)", []);
+    cache::set("thr:dbinit", 1, 86400);
+}
+function throttle_db_count($bucket) {
+    $c = conn();
+    throttle_db_init($c);
+    $r = db::query($c, "SELECT n, expires FROM throttle WHERE bucket = ?", [$bucket]);
+    if (count($r) == 0) { return 0; }
+    if (type::to_int($r[0]["expires"]) < date::timestamp()) { return 0; }
+    return type::to_int($r[0]["n"]);
+}
+function throttle_db_add($bucket, $window) {
+    $c = conn();
+    $n = throttle_db_count($bucket) + 1;
+    db::exec($c, "DELETE FROM throttle WHERE bucket = ?", [$bucket]);
+    db::exec($c, "INSERT INTO throttle (bucket, n, expires) VALUES (?, ?, ?)", [$bucket, $n, date::timestamp() + $window]);
+}
+// IP genel tavanı: tek bir IP, kullanıcı adı döndürerek sınırsız deneme yapamasın.
+function login_ip_key() {
+    $ip = request::ip(); if ($ip == null) { $ip = ""; }
+    return "login-ip:" . $ip;
+}
+function login_ip_max() { return 20; }
 function login_allowed($key) {
-    $n = cache::get($key);
-    if ($n == null) { return true; }
-    return type::to_int($n) < login_max_attempts();
+    if (throttle_db_count($key) >= login_max_attempts()) { return false; }
+    if (throttle_db_count(login_ip_key()) >= login_ip_max()) { return false; }
+    return true;
 }
 function login_failed($key) {
-    $n = cache::get($key);
-    if ($n == null) { $n = 0; }
-    cache::set($key, type::to_int($n) + 1, login_window_sec());
+    throttle_db_add($key, login_window_sec());
+    throttle_db_add(login_ip_key(), login_window_sec());
 }
 // Başarılı girişte sayacı sıfırla (meşru kullanıcı yazım hatalarıyla kilitlenmesin).
-function login_reset($key) { cache::delete($key); }
+function login_reset($key) {
+    $c = conn();
+    throttle_db_init($c);
+    db::exec($c, "DELETE FROM throttle WHERE bucket = ?", [$key]);
+}
 
 // ── güvenlik başlıkları ───────────────────────────────────────────────────────
 // before_route ile route AYNI WebContext'i paylaşır (http_main.cpp: vm.set_web_context

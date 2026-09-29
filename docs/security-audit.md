@@ -582,3 +582,32 @@ wildcards — a cost, not a vulnerability. Block nesting is capped at depth 3
 10. **LP-14, LP-16, LP-17, LP-18, LP-19, LP-20, LP-12, LP-13** — small hygiene fixes,
     can ship together.
 11. Follow-up: CSP nonce (LP-21) once inline scripts are moved to `nonce`-tagged blocks.
+
+---
+
+## External review, 2026-09-29: status
+
+A second, independent review was checked claim by claim against the code and, where
+it mattered, measured on a running instance.
+
+| # | Claim | Verdict | Status |
+|---|---|---|---|
+| 1 | `/api/{type}` serves `public:false` modules | Correct (LP-12) | Fixed: the API honours `config.public` |
+| 2 | Checkout stock check/decrement race | Correct | Fixed: check + order + decrement in one transaction (`BEGIN IMMEDIATE`) |
+| 3 | Role read from the session, so demotion/deletion did not affect live sessions | Correct, and wider than reported (`can()` too) | Fixed: role read from the database per request |
+| 4 | Compose ships a default admin password | Correct (LP-09) | Fixed: compose refuses to start without `ADMIN_PASSWORD` |
+| 5 | Login throttle bypass through username variations | Incorrect: the key is lower-cased and trimmed | The per-process counter part was correct; counters are now database-backed, plus a per-IP ceiling |
+| 6 | Markdown scheme filter bypass with whitespace | Correct, and worse: mixed case (`JaVaScRiPt:`) passed too | Fixed: allow-list instead of deny-list |
+| 7 | Menu and social URLs not scheme-filtered | Correct (LP-15) | Fixed: filtered on save and on render |
+| 8 | `activate_scheduled` writes on every request | Correct (performance) | Fixed: reads first, writes only when something is due |
+| 9 | `analytics_head` is raw HTML behind `settings` | Correct, by design | Changed: also requires the `html` permission |
+| 10 | No stock decrement for products without variants | Such products had no stock field at all | Added: optional `stok` field, enforced in cart and checkout |
+| low | Logout via GET | Correct (LP-16) | Fixed: POST with CSRF, admin and members |
+| low | CSRF token compared with `==` | Correct | Fixed: `crypto::constant_compare` |
+
+Not changed: a password change does not end the account's other sessions; the login
+form itself carries no CSRF token (login CSRF, LP-16); LP-10, LP-17, LP-18 and LP-21.
+
+Known trade-off of the per-IP login ceiling: 20 failures from one address lock every
+login from that address for 10 minutes, including a correct one. Behind a proxy that
+is not declared in `LOOK_TRUSTED_PROXY` all clients share one address.

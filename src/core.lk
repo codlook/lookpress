@@ -35,7 +35,12 @@ function schedule_input($iso) {
 // once per request via before_route — visibility stays gated by published_rev > 0,
 // so no public read query changes. No external scheduler/cron needed.
 function activate_scheduled($c) {
-    db::exec($c, "UPDATE content SET published_rev = current_rev, publish_at = NULL WHERE status = 'published' AND published_rev = 0 AND current_rev > 0 AND publish_at IS NOT NULL AND publish_at <= ?", [date::now()]);
+    // Önce oku: her istekte koşulsuz UPDATE, 0 satır etkilese bile yazma kilidi alıyordu
+    // (çok worker + SQLite'ta çekişme). Vadesi gelen kayıt yoksa hiç yazılmaz.
+    $now = date::now();
+    $due = db::query($c, "SELECT id FROM content WHERE status = 'published' AND published_rev = 0 AND current_rev > 0 AND publish_at IS NOT NULL AND publish_at <= ? LIMIT 1", [$now]);
+    if (count($due) == 0) { return; }
+    db::exec($c, "UPDATE content SET published_rev = current_rev, publish_at = NULL WHERE status = 'published' AND published_rev = 0 AND current_rev > 0 AND publish_at IS NOT NULL AND publish_at <= ?", [$now]);
 }
 
 // ── settings (namespaced key-value, cached) ──────────────────────────────────
@@ -83,7 +88,8 @@ function theme_globals($c) {
     $sh = "";
     $socials = [["social_instagram", "Instagram"], ["social_facebook", "Facebook"], ["social_x", "X"], ["social_youtube", "YouTube"], ["social_linkedin", "LinkedIn"]];
     foreach ($socials as $s) {
-        if ($g[$s[0]] != "") { $sh = $sh . "<a href=\"" . html::escape($g[$s[0]]) . "\" rel=\"noopener\" target=\"_blank\">" . $s[1] . "</a>"; }
+        $su = safe_url($g[$s[0]]);
+        if ($su != "") { $sh = $sh . "<a href=\"" . html::escape($su) . "\" rel=\"noopener\" target=\"_blank\">" . $s[1] . "</a>"; }
     }
     $g["social_html"] = $sh;
     $ch = "";
@@ -113,7 +119,17 @@ function menu_items($c, $loc) {
     if (count($rows) == 0) { return []; }
     $items = json::decode($rows[0]["items_json"]);
     if ($items == null) { return []; }
-    return $items;
+    // Menü URL'leri şema izin-listesinden geçer: html::escape öznitelikten kaçışı önler
+    // ama javascript: şemasını engellemez. Geçersiz URL'li öğe basılmaz.
+    $out = [];
+    foreach ($items as $it) {
+        if ($it == null || !type::is_array($it)) { continue; }
+        $u = safe_url($it["url"]);
+        if ($u == "") { continue; }
+        $it["url"] = $u;
+        $out = array::push($out, $it);
+    }
+    return $out;
 }
 
 // A THEME is a template directory (views/themes/{theme}/) that may override any
@@ -319,8 +335,8 @@ function seo_head($title, $desc, $ogtype, $jsonld) {
 
 // Auth: real users (PBKDF2 via auth::), session-backed. is_admin() = any logged-in
 // user may reach the admin; is_super() (role 'admin') gates user management.
-function is_admin() { session::start(); return session::get("uid") != null; }
-function is_super() { session::start(); return session::get("role") == "admin"; }
+function is_admin() { return current_role() != ""; }
+function is_super() { return current_role() == "admin"; }
 
 // Absolute origin of the current request (proto + host) for sitemap/feed/hreflang.
 function base_url() {
