@@ -736,7 +736,7 @@ function migrate_rows($c, $type, $sql, $ts_field) {
         // golden-gate diff: stored v1 body_html vs freshly re-rendered
         if ($r["body_html"] != $new_html) {
             $diffs = $diffs + 1;
-            print("  DIFF  " . $type . "/" . $r["slug"] . "  (old " . string::length($r["body_html"]) . "b vs new " . string::length($new_html) . "b)\n");
+            print("  DIFF  " . $type . "/" . $r["slug"] . "  (old " . string::len($r["body_html"]) . "b vs new " . string::len($new_html) . "b)\n");
         }
     }
     print("  " . $type . ": migrated " . count($rows) . ", body_html diffs " . $diffs . "\n");
