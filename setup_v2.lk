@@ -6,6 +6,7 @@ use "lib/migrate.lk";
 use "lib/markdown.lk";
 use "src/hooks.lk";                    // extension seam
 use "extensions/commerce/schema.lk";  // registers commerce migrate/seed hooks (routes-free)
+use "src/search_text.lk";            // search_backfill — revisions.search_norm
 use json;
 use date;
 use type;
@@ -84,9 +85,14 @@ $migrations = [
         "id"         => "pk",
         "location"   => "string(40) unique",
         "items_json" => "text"
-    ]]
+    ]],
+    // Search: the folded text of a revision (src/search_text.lk). NULL until filled below.
+    ["id" => "v2_0013_revisions_search_norm", "add_column" => "revisions", "column" => ["search_norm", "text", ["null" => true]]]
 ];
 migrate_run($c, $migrations);
+// Fill search_norm for every revision that has none yet (existing content on upgrade,
+// revisions written before this release). Idempotent: only NULL rows are touched.
+while (search_backfill($c, 500) > 0) { }
 // Commerce (orders / order_items / coupons) is an EXTENSION — it owns its schema.
 // The extension overrides xp_migrate (commerce/schema.lk); the core default is a no-op.
 xp_migrate($c);

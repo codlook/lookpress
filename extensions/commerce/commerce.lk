@@ -99,7 +99,7 @@ function variant_stock_decrement($c, $slug, $sku, $qty) {
             $pn = type::to_int($ps) - $qty;
             if ($pn < 0) { $pn = 0; }
             $pvals["stok"] = "" . $pn;
-            db::exec($c, "UPDATE revisions SET fields_json = ? WHERE id = ?", [json::encode($pvals), $prow["rid"]]);
+            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = NULL WHERE id = ?", [json::encode($pvals), $prow["rid"]]);   // metin değişti → arama yeniden hesaplar
         }
         return;
     }
@@ -119,7 +119,7 @@ function variant_stock_decrement($c, $slug, $sku, $qty) {
         }
         if ($changed) {
             $vals["varyantlar"] = json::encode($new);
-            db::exec($c, "UPDATE revisions SET fields_json = ? WHERE id = ?", [json::encode($vals), $row["rid"]]);
+            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = NULL WHERE id = ?", [json::encode($vals), $row["rid"]]);   // metin değişti → arama yeniden hesaplar
         }
     }
 }

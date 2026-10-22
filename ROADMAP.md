@@ -133,7 +133,7 @@ module installs and adds routes/admin with no core edits.
 - **C3 Commerce depth** — product variants, inventory, tax & shipping rules,
   digital products. *Acceptance: a variable product with stock checks out.*
 - **C4 Migration & search** — a WordPress **WXR importer** (a real market lever)
-  and **FTS5** search to replace SQL `LIKE`.
+  and Turkish-aware site search that behaves the same on SQLite, MySQL and PostgreSQL.
 - **C5 Admin maturity** — list pagination, bulk actions, filters.
 
 ## Phase D — Scale & assurance

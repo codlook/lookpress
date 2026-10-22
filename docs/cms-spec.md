@@ -146,11 +146,11 @@ VM off, and the route budget stays at ≤ 69.
 
 ### Wave 4 — import, search, presets, security audit ✅ (shipped 2026-09-27, 72 routes, VM off)
 - ✅ **WordPress WXR importer** (`/admin/import`): pages/posts → modules, dry-run preview, per-type report, idempotent by slug, imported HTML sanitised, original dates kept; media is referenced, not downloaded.
-- ✅ **Search module** (`src/search.lk`): FTS5 (bm25 + snippets) when the SQLite build has it, LIKE fallback otherwise — the bundled SQLite is built without `SQLITE_ENABLE_FTS5`, so LIKE mode ships today (enabling it is one core build flag).
+- ✅ **Search module** (`src/search.lk`, `src/search_text.lk`): one path on every database — each revision stores its text folded for Turkish (`revisions.search_norm`: İ/I/ı → i, ş → s, ç → c, ğ → g, ö → o, ü → u, â/î/û → a/i/u, then lower case), the query is folded the same way and matched word by word with `LIKE ? ESCAPE '!'` (a typed `%` or `_` is a character, not a wildcard). "tisort" finds "Tişörtler", "isik" finds "IŞIK". Existing revisions are filled by a migration; a revision left empty is filled on the next search. (An FTS5 mode existed in the code but never ran — the bundled SQLite has no FTS5 — and would have made SQLite search differently from MySQL/PostgreSQL; it was removed 2026-10-22.)
 - ✅ **Vertical presets**: `LOOKPRESS_PRESET=kurumsal|haber|eticaret` (see `docs/presets.md`).
 - ✅ **Security audit** (`docs/security-audit.md`, 25 findings) — fixed and runtime-verified: LP-01 cross-type IDOR + per-module permission (`xp_type_permission`), LP-02 privilege escalation via users/roles, LP-03 raw html block permission + URL scheme allow-list, LP-04 reflected XSS, LP-05/06/08 throttling (forms, member login/reset, checkout mail), LP-07 order history by member id, LP-11 backup permissions, LP-13 preview gate.
 - ⬜ Remaining audit items (Low/Info): LP-09 compose defaults, LP-10 proxy-aware rate-limit key, LP-12 `/api` for `public:false` modules, LP-14 media-picker filename, LP-16 logout via GET / login CSRF, LP-17 login timing, LP-18 CSV filename, LP-19 docs, LP-20 re-validate cart prices at checkout, LP-21 CSP nonce.
-- ⬜ Product-layer benchmarks; core decisions: VM miscompile fix, `SQLITE_ENABLE_FTS5`.
+- ⬜ Product-layer benchmarks; core decisions: VM miscompile fix.
 
 ### Already shipped (for the record)
 Type engine + auto CRUD/API/admin · versioned content + rollback · scheduled

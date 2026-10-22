@@ -495,7 +495,7 @@ function save_content($c, $type, $id, $slug, $values, $status, $lang) {
         }
     }
     db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ?, publish_at = ? WHERE id = ?", [$rid, $prev, $pub_at, $id]);
-    // Arama indeksi (src/search.lk). FTS5 yoksa no-op; hata kaydı asla düşürmez.
+    // Arama metni (src/search.lk): yeni revizyonun search_norm'u. Hata kaydı asla düşürmez — boş kalan kolon aramada doldurulur.
     try { search_index_content($c, $id); } catch ($e) { }
     return $id;
 }

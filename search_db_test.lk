@@ -1,0 +1,39 @@
+// search_db_test.lk — arama eşleştirmesi her veritabanında AYNI sonucu verir.
+// Aramanın kullandığı katlama (src/search_text.lk) ve WHERE koşulu (`search_norm LIKE ? ESCAPE '!'`,
+// kelime başına) geçici bir tabloda sınanır. Çalıştır:
+//   DB_DSN=sqlite://./_search_probe.db lk search_db_test.lk
+//   DB_DSN=mysql://user:pass@host:3306/db lk search_db_test.lk
+//   DB_DSN=postgres://user:pass@host:5432/db lk search_db_test.lk
+// Çıktının son satırı üç sürücüde de aynı olmalı.
+use db;
+use string;
+use "src/search_text.lk";
+
+$c = db::connect(env("DB_DSN", "sqlite://./_search_probe.db"));
+db::exec($c, "DROP TABLE IF EXISTS lp_search_probe", []);
+db::exec($c, "CREATE TABLE lp_search_probe (id INT, title VARCHAR(200), search_norm TEXT)", []);
+$fixtures = [[1, "Tişörtler indirimde"], [2, "Kırmızı kapı"], [3, "IŞIK"], [4, "Yüzde 50_indirim"], [5, "Şapka"]];
+foreach ($fixtures as $f) {
+    db::exec($c, "INSERT INTO lp_search_probe (id, title, search_norm) VALUES (?, ?, ?)", [$f[0], $f[1], search_norm_of($f[1], "", "{}")]);
+}
+function probe($c, $q) {
+    $sql = "SELECT id FROM lp_search_probe WHERE 1 = 1";
+    $params = [];
+    foreach (search_like_patterns($q) as $p) { $sql = $sql . " AND search_norm LIKE ? ESCAPE '!'"; $params = array::push($params, $p); }
+    $ids = [];
+    foreach (db::query($c, $sql . " ORDER BY id", $params) as $r) { $ids = array::push($ids, "" . $r["id"]); }
+    return string::join($ids, ",");
+}
+$cases = [["tisort", "1"], ["TİŞÖRT", "1"], ["kirmizi", "2"], ["isik", "3"], ["ışık", "3"], ["IŞIK", "3"],
+          ["%%", ""], ["__", ""], ["50_ind", "4"], ["sapka", "5"], ["kirmizi kapi", "2"], ["kapi kirmizi", "2"]];
+$fail = 0; $line = "";
+foreach ($cases as $k) {
+    $got = probe($c, $k[0]);
+    if ($got == $k[1]) { print("  OK   '" . $k[0] . "' -> [" . $got . "]"); }
+    else { print("  FAIL '" . $k[0] . "' -> [" . $got . "], want [" . $k[1] . "]"); $fail = $fail + 1; }
+    $line = $line . $k[0] . "=" . $got . ";";
+}
+db::exec($c, "DROP TABLE lp_search_probe", []);
+print("RESULT " . $line);
+if ($fail > 0) { print("FAIL: " . $fail . " case(s)"); exit(1); }
+print("PASS: search matching");

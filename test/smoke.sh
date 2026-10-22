@@ -76,6 +76,28 @@ code_is "admin sees orders"               "/admin/orders" 200 -b "$EJAR"
 code_is "wrong password does not redirect" "/admin/login" 200 -c "$WJAR" -b "$WJAR" -X POST -d "username=admin&password=WRONG"
 code_is "wrong password opens no session" "/admin" 302 -b "$WJAR"
 
+echo "-- search (Turkish letters, LIKE metacharacters) --"
+# Fixture pages are created through the admin form (the real write path); a run
+# suffix keeps slugs and titles unique, so the suite can run twice on one database.
+S="$$$(date +%s)"
+ADMIN_TOKEN="$(body -b "$EJAR" "$BASE/admin/type/page/new" | grep -o '<meta name="csrf" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//')"
+mkpage() {   # mkpage SLUG TITLE
+  code_is "fixture page '$2' saved" "/admin/type/page/new" 302 -b "$EJAR" -X POST --data-urlencode "_csrf=$ADMIN_TOKEN" \
+    --data-urlencode "title=$2" --data-urlencode "slug=$1-$S" -d "status=published&lang=tr" --data-urlencode "body=Arama testi"
+}
+mkpage srch-a "Tişörtler indirimde $S"
+mkpage srch-b "Kırmızı kapı $S"
+mkpage srch-c "IŞIK $S"
+# finds TAG QUERY TITLE / misses TAG QUERY TITLE
+finds()  { if body -G --data-urlencode "q=$2" "$BASE/search" | grep -qF -- "$3"; then ok "$1"; else bad "$1 (no '$3')"; fi; }
+misses() { if body -G --data-urlencode "q=$2" "$BASE/search" | grep -qF -- "$3"; then bad "$1 (found '$3')"; else ok "$1"; fi; }
+finds  "tisort finds Tişörtler"   "tisort"  "Tişörtler indirimde $S"
+finds  "kirmizi finds Kırmızı"    "kirmizi" "Kırmızı kapı $S"
+finds  "isik finds IŞIK"          "isik"    "IŞIK $S"
+finds  "ışık finds IŞIK"          "ışık"    "IŞIK $S"
+misses "% is a character, not a wildcard" "%%" "Tişörtler indirimde $S"
+misses "_ is a character, not a wildcard" "__" "Kırmızı kapı $S"
+
 echo ""
 echo "== $((n-fails))/$n passed =="
 [ "$fails" -eq 0 ] || { echo "SMOKE FAILED ($fails)"; exit 1; }

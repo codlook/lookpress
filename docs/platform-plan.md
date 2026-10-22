@@ -253,7 +253,7 @@ mechanisms this contract allows:
 | V2.7 | Media / image pipeline | folders, alt text, WebP/srcset (needs an exec-capable module) |
 | V2.8 | Form engine | field builder, validation, spam, notify, export |
 | V2.9 | API v1 | filter/sort/paginate/include; OpenAPI |
-| V2.10 | Search | FTS5 over content |
+| V2.10 | Search | Turkish-folded search over content (same on every database) |
 | V2.11 | Backup / restore | DB + uploads + config snapshot |
 | V2.12 | Production security / health | headers, rate limit, health dashboard |
 | V2.13 | WordPress importer | WXR → content types |

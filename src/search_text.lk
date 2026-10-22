@@ -1,0 +1,116 @@
+// src/search_text.lk — arama metni: bir revizyondan aranacak düz metni çıkarır ve TEK
+// Türkçe katlama fonksiyonuyla normalleştirir. Kayıtta (revisions.search_norm) ve sorguda
+// AYNI fonksiyon kullanılır — iki taraf aynı biçime iner, eşleşme SQL sürücüsüne bağlı
+// değildir (SQLite, MySQL ve PostgreSQL aynı sonucu verir). Saf fonksiyonlar + bir doldurma
+// yardımcısı; route yok, çekirdek iç adı yok (setup_v2.lk de dahil eder).
+use db;
+use json;
+use type;
+use string;
+use array;
+use html;
+
+// ── indekslenecek düz metin ──────────────────────────────────────────────────
+// Metin-benzeri alan değerlerini topla: string (medya/URL değilse), blocks/repeater
+// listelerinde text/title/subtitle/content/body/caption anahtarları (derinlik ≤ 4).
+function search_collect_text($v, $depth) {
+    // derinlik: JSON-in-string çözümü de bir seviye yer; columns→cols→blocks→text ≈ 6
+    if ($v == null || $depth > 10) { return ""; }
+    if (type::is_string($v)) {
+        $s = string::trim($v);
+        if ($s == "") { return ""; }
+        if (string::starts_with($s, "/media/") || string::starts_with($s, "http://") || string::starts_with($s, "https://")) { return ""; }
+        // JSON-in-string (blocks/gallery/repeater textarea) → çöz ve içine in
+        if (string::starts_with($s, "[") || string::starts_with($s, "{")) {
+            $d = json::decode($s);
+            if ($d != null && type::is_array($d)) { return search_collect_text($d, $depth + 1); }
+        }
+        return $s . " ";
+    }
+    if (type::is_array($v)) {
+        $out = "";
+        $keys = array::keys($v);
+        $n = count($keys); $i = 0;
+        while ($i < $n) {
+            $k = $keys[$i]; $i = $i + 1;
+            $ks = type::to_string($k);
+            // liste (sayısal anahtar) → her öğe; assoc → yalnız metin anahtarları
+            $take = false;
+            if (string::regex_match($ks, "^[0-9]+$")) { $take = true; }
+            if ($ks == "text" || $ks == "title" || $ks == "subtitle" || $ks == "content" || $ks == "body" || $ks == "caption" || $ks == "items" || $ks == "blocks" || $ks == "rows" || $ks == "columns" || $ks == "cols") { $take = true; }
+            if ($take) { $out = $out . search_collect_text($v[$k], $depth + 1); }
+        }
+        return $out;
+    }
+    return "";
+}
+// Bir revizyon → indeks metni (HTML soyulmuş, boşluk sıkıştırılmış, ESCAPE edilmiş).
+function search_plain_text($body_html, $fields_json) {
+    $txt = "";
+    if ($body_html != null && $body_html != "") { $txt = html::strip($body_html) . " "; }
+    $vals = json::decode($fields_json);
+    if ($vals != null && type::is_array($vals)) {
+        $keys = array::keys($vals);
+        $n = count($keys); $i = 0;
+        while ($i < $n) {
+            $k = type::to_string($keys[$i]); $i = $i + 1;
+            if ($k == "body" || $k == "title" || $k == "seo_title" || $k == "seo_desc") { continue; }
+            $txt = $txt . search_collect_text($vals[$k], 0);
+        }
+    }
+    // Tüm toplananı soy (blok metinlerinde de etiket olabilir) ve html::strip'in
+    // bıraktığı yaygın entity'leri düz karaktere çevir (&amp; en SON — çift çözüm olmasın).
+    // Sonuç DÜZ METİN; escape indeks yazımında / özet üretiminde yapılır.
+    $txt = html::strip($txt);
+    $txt = string::replace($txt, "&lt;", "<"); $txt = string::replace($txt, "&gt;", ">");
+    $txt = string::replace($txt, "&quot;", "\""); $txt = string::replace($txt, "&#39;", "'");
+    $txt = string::replace($txt, "&nbsp;", " "); $txt = string::replace($txt, "&amp;", "&");
+    $txt = string::regex_replace($txt, "\\s+", " ");
+    return string::trim($txt);
+}
+
+
+// ── Türkçe katlama ───────────────────────────────────────────────────────────
+// İ, I, ı → i · ş → s · ç → c · ğ → g · ö → o · ü → u · â, î, û → a, i, u; sonra küçük harf.
+// Türkçe harfler string::lower'DAN ÖNCE çevrilir: "I"nın küçüğü dile göre "ı" ya da "i"dir,
+// burada ikisi de "i" olur — "isik", "ışık" ve "IŞIK" aynı biçime iner.
+function search_fold($s) {
+    if ($s == null) { return ""; }
+    $t = type::to_string($s);
+    foreach ([["İ", "i"], ["I", "i"], ["ı", "i"], ["Ş", "s"], ["ş", "s"], ["Ç", "c"], ["ç", "c"],
+              ["Ğ", "g"], ["ğ", "g"], ["Ö", "o"], ["ö", "o"], ["Ü", "u"], ["ü", "u"],
+              ["Â", "a"], ["â", "a"], ["Î", "i"], ["î", "i"], ["Û", "u"], ["û", "u"]] as $p) {
+        $t = string::replace($t, $p[0], $p[1]);
+    }
+    return string::lower($t);
+}
+// Bir revizyonun aranacak metni: başlık + düz metin, katlanmış.
+function search_norm_of($title, $body_html, $fields_json) {
+    $tt = $title; if ($tt == null) { $tt = ""; }
+    return search_fold($tt . " " . search_plain_text($body_html, $fields_json));
+}
+// Kullanıcının metni → LIKE kalıpları (kelime başına bir tane, en çok 8). Kalıp
+// parametreyle geçirilir; kullanıcının %, _ ve kaçış karakteri ! harf olarak aranır
+// (sorgu `LIKE ? ESCAPE '!'` — ! üç sürücüde de aynı yazılır, ters bölü tırnaklamasından kaçınılır).
+function search_like_patterns($q) {
+    $out = [];
+    foreach (string::split(search_fold(string::trim($q)), " ") as $w) {
+        $w = string::trim($w);
+        if ($w == "" || count($out) >= 8) { continue; }
+        $w = string::replace($w, "!", "!!");
+        $w = string::replace($w, "%", "!%");
+        $w = string::replace($w, "_", "!_");
+        $out = array::push($out, "%" . $w . "%");
+    }
+    return $out;
+}
+// search_norm'u boş (NULL) revizyonları doldurur, en çok $limit tane; doldurulan sayıyı döner.
+// Kurulum (setup_v2) bunu boş satır kalmayana dek çağırır; arama da her sorguda bir kez
+// çağırır — yeni bir yazma yolu kolonu doldurmayı unutsa da içerik bulunur.
+function search_backfill($c, $limit) {
+    $rows = db::query($c, "SELECT id, title, body_html, fields_json FROM revisions WHERE search_norm IS NULL LIMIT " . type::to_int($limit), []);
+    foreach ($rows as $r) {
+        db::exec($c, "UPDATE revisions SET search_norm = ? WHERE id = ?", [search_norm_of($r["title"], $r["body_html"], $r["fields_json"]), $r["id"]]);
+    }
+    return count($rows);
+}

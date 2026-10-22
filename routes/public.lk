@@ -34,7 +34,7 @@ route("GET", "/media/{name}", function() {
     return;
 });
 
-// ── search (src/search.lk: FTS5 when the SQLite build has it, LIKE otherwise) ──
+// ── search (src/search.lk: Turkish-folded LIKE, same on every database) ──
 // Dil: ?lang=en ya da /en yolu → "en", aksi hâlde "tr". 2 karakterden kısa sorgu
 // sorgulanmaz; şablon dostça uyarı basar.
 route("GET", "/search", function() {
