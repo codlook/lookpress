@@ -1,0 +1,73 @@
+// lib/sqlport.lk — the few DDL pieces that differ between SQLite, MySQL and PostgreSQL.
+//
+// Every helper checks before it changes anything, so a setup that stopped half way (MySQL
+// commits each DDL statement on its own; there is nothing to roll back) can simply run again.
+// Used by lib/migrate.lk (setup), extensions/commerce/schema.lk and, at run time, the
+// extensions that create their own tables (members).
+use db;
+use type;
+
+// Auto-increment primary key column type.
+function sql_pk_type($driver) {
+    if ($driver == "mysql") { return "BIGINT AUTO_INCREMENT PRIMARY KEY"; }
+    if ($driver == "postgres") { return "BIGSERIAL PRIMARY KEY"; }
+    return "INTEGER PRIMARY KEY AUTOINCREMENT";
+}
+function sql_pk($c) { return sql_pk_type(db::driver($c)); }
+
+// Does $table have column $col? (SQLite: PRAGMA; MySQL/PostgreSQL: information_schema.)
+function db_has_column($c, $table, $col) {
+    $d = db::driver($c);
+    if ($d == "sqlite") {
+        foreach (db::query($c, "PRAGMA table_info(" . $table . ")", []) as $ci) { if ($ci["name"] == $col) { return true; } }
+        return false;
+    }
+    $schema = "current_schema()"; if ($d == "mysql") { $schema = "DATABASE()"; }
+    $n = db::col($c, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = " . $schema . " AND table_name = ? AND column_name = ?", [$table, $col]);
+    return type::to_int($n) > 0;
+}
+
+// Add a column if it is missing.
+function ensure_column($c, $table, $col, $decl) {
+    if (!db_has_column($c, $table, $col)) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
+}
+
+// Create an index if it is missing. $cols is the column list as SQL ("lang, type, slug").
+// (MySQL has no CREATE INDEX IF NOT EXISTS, so every driver checks first: db_has_index below.)
+function ensure_index($c, $name, $table, $cols, $unique) {
+    $u = ""; if ($unique) { $u = "UNIQUE "; }
+    if (!db_has_index($c, $table, $name)) { db::exec($c, "CREATE " . $u . "INDEX " . $name . " ON " . $table . " (" . $cols . ")", []); }
+}
+
+// A text field of a JSON column, as SQL: json_extract (SQLite), JSON_UNQUOTE(JSON_EXTRACT)
+// (MySQL — without UNQUOTE a string comes back with its quotes), ->> (PostgreSQL, which has no
+// json_extract). $field must already be checked to be [A-Za-z0-9_]: it goes into the SQL text.
+function sql_json_text($c, $col, $field) {
+    $d = db::driver($c);
+    if ($d == "mysql") { return "JSON_UNQUOTE(JSON_EXTRACT(" . $col . ", '$." . $field . "'))"; }
+    if ($d == "postgres") { return "(" . $col . "::json ->> '" . $field . "')"; }
+    return "json_extract(" . $col . ", '$." . $field . "')";
+}
+
+// Table options after CREATE TABLE (...). MySQL: utf8mb4 stated on every table — a table takes
+// its character set from the database's default, which is latin1 on MySQL 5.7, MariaDB and many
+// hosting panels; there Turkish letters and 4-byte characters (emoji) cannot be stored at all.
+function sql_table_opts_for($driver) {
+    if ($driver == "mysql") { return " DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"; }
+    return "";
+}
+function sql_table_opts($c) { return sql_table_opts_for(db::driver($c)); }
+
+// Does table $table exist? / does index $name exist? (in the connection's current database)
+function db_has_table($c, $table) {
+    $d = db::driver($c);
+    if ($d == "sqlite") { return type::to_int(db::col($c, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", [$table])) > 0; }
+    $schema = "current_schema()"; if ($d == "mysql") { $schema = "DATABASE()"; }
+    return type::to_int(db::col($c, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = " . $schema . " AND table_name = ?", [$table])) > 0;
+}
+function db_has_index($c, $table, $name) {
+    $d = db::driver($c);
+    if ($d == "sqlite") { return type::to_int(db::col($c, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?", [$name])) > 0; }
+    if ($d == "mysql") { return type::to_int(db::col($c, "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", [$table, $name])) > 0; }
+    return type::to_int(db::col($c, "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = current_schema() AND tablename = ? AND indexname = ?", [$table, $name])) > 0;
+}

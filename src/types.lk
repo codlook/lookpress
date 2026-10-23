@@ -209,7 +209,8 @@ function list_filter_defs($c, $t, $active) {
                 // JSON path'e sadece güvenli karakterlerle girsin
                 $safe = $fname;
                 if (!string::regex_match($safe, "^[A-Za-z0-9_]+$")) { $safe = "category"; }
-                $rows = db::query($c, "SELECT DISTINCT json_extract(r.fields_json, '$." . $safe . "') AS v FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? AND json_extract(r.fields_json, '$." . $safe . "') IS NOT NULL AND json_extract(r.fields_json, '$." . $safe . "') != '' ORDER BY 1", [$t["slug"]]);
+                $jx = sql_json_text($c, "r.fields_json", $safe);   // sürücüye göre (lib/sqlport.lk)
+                $rows = db::query($c, "SELECT DISTINCT " . $jx . " AS v FROM content c JOIN revisions r ON r.id = c.current_rev WHERE c.type = ? AND " . $jx . " IS NOT NULL AND " . $jx . " != '' ORDER BY 1", [$t["slug"]]);
                 foreach ($rows as $r) { $iv = type::to_string($r["v"]); $opts = array::push($opts, ["value" => $iv, "label" => $iv, "selected" => ($cur == $iv)]); }
             } }
             $d["options"] = $opts;
@@ -218,7 +219,7 @@ function list_filter_defs($c, $t, $active) {
     }
     return $defs;
 }
-// Filtre WHERE parçası: status → c.status; alan → json_extract(r.fields_json,'$.f')
+// Filtre WHERE parçası: status → c.status; alan → JSON alanı (sql_json_text, sürücüye göre)
 // (select/relation/category: tam eşleşme; diğer: LIKE %v%). Alan adı güvenli-karakter
 // kontrolünden geçmezse filtre atlanır. Döner: ["sql" => " AND …", "params" => [...]].
 function list_filter_where($t, $active) {
@@ -234,7 +235,7 @@ function list_filter_where($t, $active) {
         if (!string::regex_match($fname, "^[A-Za-z0-9_]+$")) { continue; }
         $f = type_field_def($t["fields"], $fname);
         $ft = ""; if ($f != null) { $ft = $f["type"]; if ($ft == null) { $ft = ""; } }
-        $expr = "json_extract(r.fields_json, '$." . $fname . "')";
+        $expr = sql_json_text(conn(), "r.fields_json", $fname);   // sürücüye göre (lib/sqlport.lk)
         if ($ft == "select" || $ft == "relation" || $ft == "category") {
             $sql = $sql . " AND " . $expr . " = ?"; $params = array::push($params, $cur);
         } else {

@@ -45,6 +45,7 @@ if (env("ADMIN_PASSWORD", "") == "lookpress-dev") {
     log::warn("ADMIN_PASSWORD is the well-known development value. Change it before exposing this instance.");
 }
 use "config/config.lk";
+use "lib/sqlport.lk";  // sürücüye duyarlı DDL (eklentilerin çalışma-zamanı tabloları)
 
 // ── core seams + domain modules (functions only; no routes) ──────────────────
 use "src/hooks.lk";    // action/filter registry (the extension seam)

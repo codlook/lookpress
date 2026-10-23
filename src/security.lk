@@ -106,7 +106,7 @@ function login_key($username) {
 // oluşturulur; yalnız başarısız girişte yazılır.
 function throttle_db_init($c) {
     if (cache::get("thr:dbinit") != null) { return; }
-    db::exec($c, "CREATE TABLE IF NOT EXISTS throttle (bucket VARCHAR(200) PRIMARY KEY, n INTEGER DEFAULT 0, expires INTEGER DEFAULT 0)", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS throttle (bucket VARCHAR(200) PRIMARY KEY, n INTEGER DEFAULT 0, expires INTEGER DEFAULT 0)" . sql_table_opts($c), []);
     cache::set("thr:dbinit", 1, 86400);
 }
 function throttle_db_count($bucket) {

@@ -95,26 +95,20 @@ migrate_run($c, $migrations);
 xp_migrate($c);
 // Composite uniqueness: a slug is unique per (lang, type) — a page and a post may
 // share a slug (different URL namespaces). migrate has no composite-unique DSL, so
-// create it directly.
-db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_lang_type_slug ON content(lang, type, slug)", []);
-db::exec($c, "CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_ns_key ON settings(ns, skey)", []);
+// create it directly (lib/sqlport.lk: MySQL has no CREATE INDEX IF NOT EXISTS).
+ensure_index($c, "idx_content_lang_type_slug", "content", "lang, type, slug", true);
+ensure_index($c, "idx_settings_ns_key", "settings", "ns, skey", true);
 
-// Idempotent column add (SQLite has no ADD COLUMN IF NOT EXISTS) — a small
-// migration primitive so tables can grow columns on later releases safely.
-function ensure_column($c, $table, $col, $decl) {
-    $info = db::query($c, "PRAGMA table_info(" . $table . ")", []);
-    $found = false;
-    foreach ($info as $ci) { if ($ci["name"] == $col) { $found = true; } }
-    if (!$found) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
-}
+// Columns added on later releases: ensure_column (lib/sqlport.lk) adds one only if missing.
 // (commerce's orders/order_items/coupons columns are defined in its own schema hook)
 
 // Scheduled publishing: a nullable ISO datetime ("YYYY-MM-DD HH:MM:SS"). When set
 // and in the future, save_content holds published_rev at 0 (not publicly visible);
 // a per-request before_route sweep (activate_scheduled) flips it live once due. No
 // new read query needed — visibility stays gated by published_rev > 0.
-ensure_column($c, "content", "publish_at", "TEXT");
-db::exec($c, "CREATE INDEX IF NOT EXISTS idx_content_publish_at ON content(publish_at)", []);
+// VARCHAR, not TEXT: MySQL cannot index a TEXT column without a prefix length.
+ensure_column($c, "content", "publish_at", "VARCHAR(32)");
+ensure_index($c, "idx_content_publish_at", "content", "publish_at", false);
 
 // Modül konfigürasyonu (spine): content_types.config_json — sidebar grubu, ikon,
 // tekil/çoğul etiket, liste kolonları, filtreler, sıra, public bayrağı. Tüm anahtarlar
@@ -127,13 +121,13 @@ ensure_column($c, "content_types", "config_json", "TEXT");
 ensure_column($c, "form_submissions", "status", "VARCHAR(20) DEFAULT 'acik'");
 ensure_column($c, "form_submissions", "notes", "TEXT");
 ensure_column($c, "form_submissions", "updated_at", "INTEGER DEFAULT 0");
-db::exec($c, "CREATE INDEX IF NOT EXISTS idx_form_subs_key_status ON form_submissions(form_key, status)", []);
+ensure_index($c, "idx_form_subs_key_status", "form_submissions", "form_key, status", false);
 
 // Media library (uploads — NOT versioned content). The v1 baseline (setup.lk) created
 // this table, so the live DB already has it; but a FRESH v2-only clone would not, and
 // /admin/media + upload would 500 ("first example doesn't run"). Create it idempotently
 // so a clean clone works out of the box; on the live DB this is a no-op.
-db::exec($c, "CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY AUTOINCREMENT, sha_name VARCHAR(80) UNIQUE, original VARCHAR(255), mime VARCHAR(80), size INTEGER DEFAULT 0, created_at INTEGER DEFAULT 0)", []);
+db::exec($c, "CREATE TABLE IF NOT EXISTS media (id " . sql_pk($c) . ", sha_name VARCHAR(80) UNIQUE, original VARCHAR(255), mime VARCHAR(80), size INTEGER DEFAULT 0, created_at INTEGER DEFAULT 0)" . sql_table_opts($c), []);
 
 // ── seed built-in types ─────────────────────────────────────────────────────
 function seed_type($c, $slug, $label, $url, $fields) {
@@ -723,42 +717,61 @@ if (env("LOOKPRESS_SEED", "0") == "1" && $lp_preset == "eticaret") { seed_preset
 // ── migrate rows + diff report ──────────────────────────────────────────────
 function migrate_rows($c, $type, $sql, $ts_field) {
     $rows = db::query($c, $sql, []);
-    $diffs = 0;
+    $diffs = 0; $done = 0;
     foreach ($rows as $r) {
-        $ts = type::to_int($r[$ts_field]);
-        db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, 'tr', ?, ?, ?)",
-            [$type, $r["slug"], $r["status"], $ts, $ts]);
-        $cid = db::last_id($c);
-        $new_html = markdown_to_html($r["body"]);
-        db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, '{}', 0, ?, 'migrated from v1')",
-            [$cid, $r["title"], $r["body"], $new_html, $ts]);
-        $rid = db::last_id($c);
-        $prev = 0;
-        if ($r["status"] == "published") { $prev = $rid; }
-        db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $cid]);
+        // Already moved (a run that stopped part way) → skip; resuming must not duplicate.
+        if (count(db::query($c, "SELECT id FROM content WHERE type = ? AND lang = 'tr' AND slug = ?", [$type, $r["slug"]])) > 0) { continue; }
+        // One row = one transaction: content, revision and the revision pointers land together
+        // or not at all (DML is transactional on SQLite, MySQL and PostgreSQL alike).
+        $new_html = db::transaction($c, function() use ($c, $type, $r, $ts_field) {
+            $ts = type::to_int($r[$ts_field]);
+            db::exec($c, "INSERT INTO content (type, slug, lang, status, created_at, updated_at) VALUES (?, ?, 'tr', ?, ?, ?)",
+                [$type, $r["slug"], $r["status"], $ts, $ts]);
+            $cid = db::last_id($c);
+            $html = markdown_to_html($r["body"]);
+            db::exec($c, "INSERT INTO revisions (content_id, rev_no, title, body_md, body_html, fields_json, author_id, created_at, note) VALUES (?, 1, ?, ?, ?, '{}', 0, ?, 'migrated from v1')",
+                [$cid, $r["title"], $r["body"], $html, $ts]);
+            $rid = db::last_id($c);
+            $prev = 0;
+            if ($r["status"] == "published") { $prev = $rid; }
+            db::exec($c, "UPDATE content SET current_rev = ?, published_rev = ? WHERE id = ?", [$rid, $prev, $cid]);
+            return $html;
+        });
+        $done = $done + 1;
         // golden-gate diff: stored v1 body_html vs freshly re-rendered
         if ($r["body_html"] != $new_html) {
             $diffs = $diffs + 1;
             print("  DIFF  " . $type . "/" . $r["slug"] . "  (old " . string::len($r["body_html"]) . "b vs new " . string::len($new_html) . "b)\n");
         }
     }
-    print("  " . $type . ": migrated " . count($rows) . ", body_html diffs " . $diffs . "\n");
+    print("  " . $type . ": migrated " . $done . " of " . count($rows) . ", body_html diffs " . $diffs . "\n");
     return $diffs;
 }
 
-// Idempotent: the v1->v2 ROW migration runs only when the v2 core is empty. Schema
-// migrations above are tracked (migrate_run) so they always apply safely; this guard
-// lets setup_v2 run on EVERY start (new tables land) without duplicating content.
+// The v1->v2 ROW migration runs once. It marks its start and its end in _look_migrations: a run
+// that stopped part way (start mark, no end mark) resumes on the next start and skips the rows
+// already moved. Schema migrations above are tracked (migrate_run) so they always apply safely;
+// setup_v2 runs on EVERY start (new tables land) without duplicating content — and without
+// bringing back v2 content an admin deleted later (the end mark stops it for good).
+// An install from before the marks: v2 content present, no mark → the migration ran then.
+function rows_mark($c, $id) { db::exec($c, "INSERT INTO _look_migrations (id, applied_at) VALUES (?, ?)", [$id, date::now()]); }
+$rows_started = migrate__is_applied($c, "v2_rows_from_v1_started");
+$rows_done    = migrate__is_applied($c, "v2_rows_from_v1_done");
 $existing = type::to_int(db::query($c, "SELECT COUNT(*) AS n FROM content", [])[0]["n"]);
-if ($existing == 0) {
+if (!$rows_done && !$rows_started && $existing > 0) {
+    rows_mark($c, "v2_rows_from_v1_done");
+    print("=== v2 content present (" . $existing . " rows) — v1->v2 row migration ran before ===\n");
+} else { if (!$rows_done) {
+    if (!$rows_started) { rows_mark($c, "v2_rows_from_v1_started"); }
     print("=== migrating v1 -> v2 ===\n");
     $d1 = migrate_rows($c, "page", "SELECT slug, title, body, body_html, status, updated_at FROM pages", "updated_at");
     $d2 = migrate_rows($c, "post", "SELECT slug, title, body, body_html, status, published_at FROM posts", "published_at");
     $total_diffs = $d1 + $d2;
+    rows_mark($c, "v2_rows_from_v1_done");
     print("=== TOTAL body_html diffs: " . $total_diffs . " (0 = clean golden-gate migration) ===\n");
 } else {
-    print("=== v2 content present (" . $existing . " rows) — skipping v1->v2 row migration ===\n");
-}
+    print("=== v1->v2 row migration done — skipping ===\n");
+} }
 
 // Tek-seferlik taşıma: eski kurulumlarda footer bağlantıları bir AYAR (sabit_footer_links)
 // olarak saklanıyordu; artık bir MENÜ (location=footer). Footer menüsü boşsa ayardan doldur.

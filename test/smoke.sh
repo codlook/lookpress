@@ -73,6 +73,15 @@ code_is "admin login redirects"           "/admin/login" 302 -c "$EJAR" -b "$EJA
 code_is "admin session opens dashboard"   "/admin" 200 -b "$EJAR"
 code_is "admin sees users"                "/admin/users" 200 -b "$EJAR"
 code_is "admin sees orders"               "/admin/orders" 200 -b "$EJAR"
+# Module list with field filters (JSON fields read per database: json_extract does not exist on
+# PostgreSQL; on MySQL it returns a string with its quotes, so the filter offered "giyim" in quotes
+# and found nothing).
+code_is "admin product list" "/admin/type/product" 200 -b "$EJAR"
+if body -b "$EJAR" "$BASE/admin/type/product" | grep -q '<option value="giyim"'; then ok "category filter offers giyim"; else bad "category filter offers giyim"; fi
+if body -b "$EJAR" "$BASE/admin/type/product?f_category=giyim" | grep -q 'Kırmızı'; then ok "category filter finds the product"; else bad "category filter finds the product"; fi
+# The order placed above shows in the dashboard's revenue (a failed sum used to read as 0).
+REV="$(body -b "$EJAR" "$BASE/admin" | grep -o '<b>[^<]*</b> ciro' | head -1 | sed 's/<b>//; s/<\/b> ciro//')"
+if echo "$REV" | grep -q '[1-9]'; then ok "dashboard revenue counts the order ($REV)"; else bad "dashboard revenue counts the order (got '$REV')"; fi
 code_is "wrong password does not redirect" "/admin/login" 200 -c "$WJAR" -b "$WJAR" -X POST -d "username=admin&password=WRONG"
 code_is "wrong password opens no session" "/admin" 302 -b "$WJAR"
 
@@ -93,6 +102,9 @@ pageid() {   # pageid TITLE -> the page's id, from the admin list filtered by th
 mkpage srch-a "Tişörtler indirimde $S"
 mkpage srch-b "Kırmızı kapı $S"
 mkpage srch-c "IŞIK $S"
+# Text comes back as written — 4-byte characters too (MySQL needs utf8mb4 for them).
+mkpage srch-emoji "Çay ☕ keyfi 🙂 $S"
+if body "$BASE/srch-emoji-$S" | grep -qF "Çay ☕ keyfi 🙂 $S"; then ok "emoji and Turkish text come back as written"; else bad "emoji and Turkish text come back as written"; fi
 # finds TAG QUERY TITLE / misses TAG QUERY TITLE
 finds()  { if body -G --data-urlencode "q=$2" "$BASE/search" | grep -qF -- "$3"; then ok "$1"; else bad "$1 (no '$3')"; fi; }
 misses() { if body -G --data-urlencode "q=$2" "$BASE/search" | grep -qF -- "$3"; then bad "$1 (found '$3')"; else ok "$1"; fi; }

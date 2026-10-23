@@ -24,9 +24,9 @@ function csrf_field_safe() { try { return csrf_field(); } catch ($e) { return ""
 
 // ── şema (tembel, idempotent) ────────────────────────────────────────────────
 function members_init($c) {
-    db::exec($c, "CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(190) UNIQUE, password_hash TEXT, name VARCHAR(120), status VARCHAR(20) DEFAULT 'active', created_at INTEGER DEFAULT 0, last_login INTEGER DEFAULT 0)", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS members (id " . sql_pk($c) . ", email VARCHAR(190) UNIQUE, password_hash TEXT, name VARCHAR(120), status VARCHAR(20) DEFAULT 'active', created_at INTEGER DEFAULT 0, last_login INTEGER DEFAULT 0)" . sql_table_opts($c), []);
     // Şifre sıfırlama token'ları: tek-kullanımlık, 60 dk ömür (expires_at unix ts).
-    db::exec($c, "CREATE TABLE IF NOT EXISTS member_resets (id INTEGER PRIMARY KEY AUTOINCREMENT, member_id INTEGER, token VARCHAR(64), expires_at INTEGER DEFAULT 0, used INTEGER DEFAULT 0)", []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS member_resets (id " . sql_pk($c) . ", member_id INTEGER, token VARCHAR(64), expires_at INTEGER DEFAULT 0, used INTEGER DEFAULT 0)" . sql_table_opts($c), []);
 }
 
 // ── şifre sıfırlama ──────────────────────────────────────────────────────────

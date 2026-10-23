@@ -210,10 +210,12 @@ function dash_commerce($c) {
         $by = array::push($by, ["status" => $s, "label" => dash_order_status_label($s), "n" => $k]);
     }
     $out["orders_by_status"] = $by;
-    // Ciro: iptal edilmemiş siparişlerin toplamı (total VARCHAR → SQLite SUM sayıya çevirir).
+    // Ciro: iptal edilmemiş siparişlerin toplamı. total VARCHAR → toplamadan önce sayıya çevrilir:
+    // SQLite ve MySQL metni kendiliğinden çeviriyordu, PostgreSQL metin üzerinde SUM yapmaz (hata
+    // aşağıda yakalanıyor, ciro SESSİZCE 0 görünüyordu). Boş total NULLIF ile toplama girmez.
     $rev = 0.0;
     try {
-        $rows = db::query($c, "SELECT COALESCE(SUM(total), 0) AS r FROM orders WHERE status != 'cancelled'", []);
+        $rows = db::query($c, "SELECT COALESCE(SUM(CAST(NULLIF(total, '') AS DECIMAL(14,2))), 0) AS r FROM orders WHERE status != 'cancelled'", []);
         if (count($rows) > 0) { $rev = type::to_float($rows[0]["r"]); }
     } catch ($e) { $rev = 0.0; }
     $out["revenue"] = dash_money($rev);

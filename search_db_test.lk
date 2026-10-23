@@ -8,10 +8,11 @@
 use db;
 use string;
 use "src/search_text.lk";
+use "lib/sqlport.lk";   // sql_table_opts — MySQL tablosu utf8mb4
 
 $c = db::connect(env("DB_DSN", "sqlite://./_search_probe.db"));
 db::exec($c, "DROP TABLE IF EXISTS lp_search_probe", []);
-db::exec($c, "CREATE TABLE lp_search_probe (id INT, title VARCHAR(200), search_norm TEXT)", []);
+db::exec($c, "CREATE TABLE lp_search_probe (id INT, title VARCHAR(200), search_norm TEXT)" . sql_table_opts($c), []);
 $fixtures = [[1, "Tişörtler indirimde"], [2, "Kırmızı kapı"], [3, "IŞIK"], [4, "Yüzde 50_indirim"], [5, "Şapka"]];
 foreach ($fixtures as $f) {
     db::exec($c, "INSERT INTO lp_search_probe (id, title, search_norm) VALUES (?, ?, ?)", [$f[0], $f[1], search_norm_of($f[1], "", "{}")]);

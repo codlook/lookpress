@@ -4,6 +4,7 @@ use date;
 use array;
 use type;
 use file;
+use "sqlport.lk";   // sql_pk_type — tek tanım (DDL sürücü farkları)
 
 // migrate — a tiny, honest schema-migration runner for LOOK.
 // No ORM, no magic: you pass an ordered list of migrations as plain data and
@@ -31,7 +32,7 @@ use file;
 // only VARCHAR columns so the same code runs on MySQL, PostgreSQL and SQLite.
 
 function migrate__ensure($conn) {
-    db::exec($conn, "CREATE TABLE IF NOT EXISTS _look_migrations (id VARCHAR(255) PRIMARY KEY, applied_at VARCHAR(32))", []);
+    db::exec($conn, "CREATE TABLE IF NOT EXISTS _look_migrations (id VARCHAR(255) PRIMARY KEY, applied_at VARCHAR(32))" . sql_table_opts($conn), []);
 }
 
 function migrate__is_applied($conn, $id) {
@@ -88,11 +89,7 @@ function migrate__is_schema($m) {
 
 // One column's type SQL for a driver. pk carries its own PK + auto-increment.
 function migrate__sqltype($driver, $type, $size) {
-    if ($type == "pk") {
-        if ($driver == "mysql") { return "BIGINT AUTO_INCREMENT PRIMARY KEY"; }
-        if ($driver == "postgres") { return "BIGSERIAL PRIMARY KEY"; }
-        return "INTEGER PRIMARY KEY AUTOINCREMENT";
-    }
+    if ($type == "pk") { return sql_pk_type($driver); }
     if ($type == "string") {
         $n = 255;
         if ($size > 0) { $n = $size; }
@@ -225,6 +222,16 @@ function migrate__index_name($m) {
     return "idx_" . $m["add_index"] . "_" . string::join($m["columns"], "_");
 }
 
+// Is a schema migration's result already in the database? (table / column / index exists)
+// A raw "up" migration cannot be checked here: its SQL must be safe to run twice.
+function migrate__in_place($conn, $m) {
+    $keys = array::keys($m);
+    if (array::contains($keys, "create_table")) { return db_has_table($conn, $m["create_table"]); }
+    if (array::contains($keys, "add_column")) { return db_has_column($conn, $m["add_column"], $m["column"][0]); }
+    if (array::contains($keys, "add_index")) { return db_has_index($conn, $m["add_index"], migrate__index_name($m)); }
+    return false;
+}
+
 // The forward (up) DDL for a schema migration.
 function migrate__gen_up($driver, $m) {
     $keys = array::keys($m);
@@ -239,7 +246,7 @@ function migrate__gen_up($driver, $m) {
             }
             push($cols, migrate__col_ddl($driver, $col));
         }
-        return "CREATE TABLE " . $m["create_table"] . " (" . string::join($cols, ", ") . ")";
+        return "CREATE TABLE " . $m["create_table"] . " (" . string::join($cols, ", ") . ")" . sql_table_opts_for($driver);
     }
     if (array::contains($keys, "add_column")) {
         return "ALTER TABLE " . $m["add_column"] . " ADD COLUMN " . migrate__col_ddl($driver, $m["column"]);
@@ -305,6 +312,14 @@ function migrate_run($conn, $migrations) {
         if (migrate__is_schema($m)) {
             if ($driver == "") {
                 $driver = db::driver($conn);
+            }
+            // Already in place (a run that stopped between the DDL and its tracking row — MySQL
+            // commits each DDL statement, so nothing is rolled back) → only record it. Running
+            // the DDL again would fail ("table already exists") and the setup could not recover.
+            if (migrate__in_place($conn, $m)) {
+                db::exec($conn, "INSERT INTO _look_migrations (id, applied_at) VALUES (?, ?)", [$id, date::now()]);
+                push($applied, $id);
+                continue;
             }
             $up = migrate__gen_up($driver, $m);
         } else {

@@ -12,36 +12,26 @@ use type;
 
 // Tables owned by commerce (idempotent — safe on every migrate run). Overrides the
 // core's no-op xp_migrate default; setup_v2.lk calls xp_migrate($c) after core tables.
+// Portable DDL (lib/sqlport.lk): the key column per driver; every step checks first, so a
+// half-finished run (MySQL commits each DDL statement) can run again.
+// address is VARCHAR, not TEXT: MySQL refuses a DEFAULT on a TEXT column.
 function xp_migrate($c) {
-    db::exec($c, "CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(200), total VARCHAR(40), status VARCHAR(20) DEFAULT 'received', created_at INTEGER DEFAULT 0, cust_name VARCHAR(120) DEFAULT '', address TEXT DEFAULT '', phone VARCHAR(40) DEFAULT '', coupon VARCHAR(40) DEFAULT '')", []);
-    db::exec($c, "CREATE TABLE IF NOT EXISTS order_items (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER, slug VARCHAR(200), title VARCHAR(200), price VARCHAR(40), qty INTEGER DEFAULT 1)", []);
-    db::exec($c, "CREATE TABLE IF NOT EXISTS coupons (id INTEGER PRIMARY KEY AUTOINCREMENT, code VARCHAR(40) UNIQUE, kind VARCHAR(10) DEFAULT 'percent', value VARCHAR(20) DEFAULT '0', active INTEGER DEFAULT 1)", []);
-    db::exec($c, "CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, name VARCHAR(120), slug VARCHAR(120) UNIQUE, parent_id INTEGER DEFAULT 0)", []);
+    $pk = sql_pk($c);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS orders (id " . $pk . ", email VARCHAR(200), total VARCHAR(40), status VARCHAR(20) DEFAULT 'received', created_at INTEGER DEFAULT 0, cust_name VARCHAR(120) DEFAULT '', address VARCHAR(1000) DEFAULT '', phone VARCHAR(40) DEFAULT '', coupon VARCHAR(40) DEFAULT '')" . sql_table_opts($c), []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS order_items (id " . $pk . ", order_id INTEGER, slug VARCHAR(200), title VARCHAR(200), price VARCHAR(40), qty INTEGER DEFAULT 1)" . sql_table_opts($c), []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS coupons (id " . $pk . ", code VARCHAR(40) UNIQUE, kind VARCHAR(10) DEFAULT 'percent', value VARCHAR(20) DEFAULT '0', active INTEGER DEFAULT 1)" . sql_table_opts($c), []);
+    db::exec($c, "CREATE TABLE IF NOT EXISTS categories (id " . $pk . ", name VARCHAR(120), slug VARCHAR(120) UNIQUE, parent_id INTEGER DEFAULT 0)" . sql_table_opts($c), []);
     // parent_id fikri hiyerarşi için: 0 = üst kategori yok (kök). Eski kurulumlarda
     // tablo parent_id'siz oluşmuş olabilir → sütunu idempotent şekilde ekle (tabloyu
-    // asla düşürme/yeniden yaratma). PRAGMA ile var mı bak, yoksa ALTER ADD COLUMN.
-    $has_parent = false;
-    foreach (db::query($c, "PRAGMA table_info(categories)", []) as $col) {
-        if ($col["name"] == "parent_id") { $has_parent = true; }
-    }
-    if (!$has_parent) {
-        db::exec($c, "ALTER TABLE categories ADD COLUMN parent_id INTEGER DEFAULT 0", []);
-    }
-    // order_items: varyant adı + sku (nullable). Eski kurulumlarda sütun yok → PRAGMA ile
-    // idempotent ekle; tablo ASLA düşürülmez/yeniden yaratılmaz.
-    commerce_ensure_col($c, "order_items", "variant_name", "VARCHAR(120)");
-    commerce_ensure_col($c, "order_items", "variant_sku", "VARCHAR(80)");
+    // asla düşürme/yeniden yaratma).
+    ensure_column($c, "categories", "parent_id", "INTEGER DEFAULT 0");
+    // order_items: varyant adı + sku (nullable). Eski kurulumlarda sütun yok → idempotent
+    // ekle; tablo ASLA düşürülmez/yeniden yaratılmaz.
+    ensure_column($c, "order_items", "variant_name", "VARCHAR(120)");
+    ensure_column($c, "order_items", "variant_sku", "VARCHAR(80)");
     // Sipariş ↔ üye bağı (audit LP-07): sipariş geçmişi e-posta eşleşmesiyle DEĞİL,
     // giriş yapmış üyenin id'siyle listelenir. 0 = misafir siparişi.
-    commerce_ensure_col($c, "orders", "member_id", "INTEGER DEFAULT 0");
-}
-// SQLite'ta ADD COLUMN IF NOT EXISTS yok → PRAGMA table_info ile bak, yoksa ALTER.
-function commerce_ensure_col($c, $table, $col, $decl) {
-    $found = false;
-    foreach (db::query($c, "PRAGMA table_info(" . $table . ")", []) as $ci) {
-        if ($ci["name"] == $col) { $found = true; }
-    }
-    if (!$found) { db::exec($c, "ALTER TABLE " . $table . " ADD COLUMN " . $col . " " . $decl, []); }
+    ensure_column($c, "orders", "member_id", "INTEGER DEFAULT 0");
 }
 
 // ── modül tanımları (yapısal, seed bayrağından BAĞIMSIZ, idempotent) ──────────
