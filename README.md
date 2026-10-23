@@ -48,8 +48,11 @@ at **/admin** (user `admin`, password from `ADMIN_PASSWORD` — the compose dev 
 `lookpress-dev`; **set your own** in a `.env` for anything real). `docker compose down` stops it and
 keeps the data; `down -v` resets to the clean demo.
 
-SQLite by default (no DB server for dev). Point `DB_DSN` at `mysql://…` / `postgres://…` for a real
-database.
+SQLite by default (no DB server for dev).
+
+> **Today LookPress installs on SQLite only.** The schema setup (`setup_v2.lk`) still uses
+> SQLite-only SQL, so pointing `DB_DSN` at `mysql://…` or `postgres://…` fails during setup.
+> MySQL and PostgreSQL support is being fixed; until then, run on SQLite.
 
 ## Project layout
 

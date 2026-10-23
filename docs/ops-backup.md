@@ -131,6 +131,9 @@ which is harmless (the next backup has it).
 
 ## MySQL and PostgreSQL
 
+> LookPress itself installs on SQLite only for now (see the README); the commands below are
+> ready for when MySQL and PostgreSQL setup works.
+
 The DSN `scheme://user:pass@host:port/db?query` is parsed by the script. Commands used:
 
 | Engine | Backup | Restore |
