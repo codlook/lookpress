@@ -90,9 +90,6 @@ $migrations = [
     ["id" => "v2_0013_revisions_search_norm", "add_column" => "revisions", "column" => ["search_norm", "text", ["null" => true]]]
 ];
 migrate_run($c, $migrations);
-// Fill search_norm for every revision that has none yet (existing content on upgrade,
-// revisions written before this release). Idempotent: only NULL rows are touched.
-while (search_backfill($c, 500) > 0) { }
 // Commerce (orders / order_items / coupons) is an EXTENSION — it owns its schema.
 // The extension overrides xp_migrate (commerce/schema.lk); the core default is a no-op.
 xp_migrate($c);
@@ -770,3 +767,8 @@ if (count($old_fl) > 0) {
     $old_items = json::decode($old_fl[0]["sval"]);
     if ($old_items != null && type::is_array($old_items) && count($old_items) > 0) { seed_menu_if_empty($c, "footer", $old_items); }
 }
+
+// Search text (revisions.search_norm, src/search_text.lk) for every revision that has none:
+// existing content on upgrade and everything seeded or migrated above. LAST, after every step
+// that writes revisions, so a search does not have to write. Idempotent: only NULL rows.
+while (search_backfill($c, 500) > 0) { }

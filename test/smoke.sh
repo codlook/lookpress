@@ -81,9 +81,14 @@ echo "-- search (Turkish letters, LIKE metacharacters) --"
 # suffix keeps slugs and titles unique, so the suite can run twice on one database.
 S="$$$(date +%s)"
 ADMIN_TOKEN="$(body -b "$EJAR" "$BASE/admin/type/page/new" | grep -o '<meta name="csrf" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//')"
-mkpage() {   # mkpage SLUG TITLE
-  code_is "fixture page '$2' saved" "/admin/type/page/new" 302 -b "$EJAR" -X POST --data-urlencode "_csrf=$ADMIN_TOKEN" \
-    --data-urlencode "title=$2" --data-urlencode "slug=$1-$S" -d "status=published&lang=tr" --data-urlencode "body=Arama testi"
+savepage() {   # savepage PATH STATUS SLUG TITLE [curl args...] — through the admin form
+  local path="$1" st="$2" slug="$3" title="$4"; shift 4
+  code_is "page '$title' saved ($st)" "$path" 302 -b "$EJAR" -X POST --data-urlencode "_csrf=$ADMIN_TOKEN" \
+    --data-urlencode "title=$title" --data-urlencode "slug=$slug" -d "status=$st&lang=tr" --data-urlencode "body=Arama testi" "$@"
+}
+mkpage() { savepage "/admin/type/page/new" published "$1-$S" "$2"; }   # mkpage SLUG TITLE
+pageid() {   # pageid TITLE -> the page's id, from the admin list filtered by the title
+  body -b "$EJAR" -G --data-urlencode "q=$1" "$BASE/admin/type/page" | grep -o "/admin/type/page/edit/[0-9]*\">$1<" | head -1 | sed 's#.*/edit/##; s#".*##'
 }
 mkpage srch-a "Tişörtler indirimde $S"
 mkpage srch-b "Kırmızı kapı $S"
@@ -97,6 +102,23 @@ finds  "isik finds IŞIK"          "isik"    "IŞIK $S"
 finds  "ışık finds IŞIK"          "ışık"    "IŞIK $S"
 misses "% is a character, not a wildcard" "%%" "Tişörtler indirimde $S"
 misses "_ is a character, not a wildcard" "__" "Kırmızı kapı $S"
+
+# Only published text is searched: not a draft, not a page scheduled for later, not the
+# old text of a page published again, not a published page taken back to draft.
+savepage "/admin/type/page/new" draft     "srch-d-$S" "Taslak kavanoz$S"
+misses "a draft is not found"              "kavanoz$S" "Taslak kavanoz$S"
+savepage "/admin/type/page/new" published "srch-e-$S" "Gelecek fincan$S" -d "publish_at=2099-01-01T10:00"
+misses "a page scheduled for later is not found" "fincan$S" "Gelecek fincan$S"
+mkpage srch-f "Eski kase$S"
+finds  "a published page is found"         "kase$S"    "Eski kase$S"
+F_ID="$(pageid "Eski kase$S")"
+savepage "/admin/type/page/edit/$F_ID" published "srch-f-$S" "Yeni tabak$S"
+finds  "published again: the new text is found"  "tabak$S" "Yeni tabak$S"
+misses "published again: the old text is not"    "kase$S"  "Eski kase$S"
+mkpage srch-g "Yayinda tencere$S"
+G_ID="$(pageid "Yayinda tencere$S")"
+savepage "/admin/type/page/edit/$G_ID" draft "srch-g-$S" "Yayinda tencere$S"
+misses "taken back to draft: not found"    "tencere$S" "Yayinda tencere$S"
 
 echo ""
 echo "== $((n-fails))/$n passed =="

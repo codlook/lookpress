@@ -60,7 +60,7 @@ function cart_line_variant($it) { return cm_str($it, "variant", ""); }
 function cart_line_is($it, $slug, $sku) { return ($it["slug"] == $slug && cart_line_variant($it) == $sku); }
 // Yayınlanmış ürün satırları (TÜM diller — aynı slug aynı fiziksel ürün; stok düşümü hepsine uygulanır).
 function product_published_rows($c, $slug) {
-    return db::query($c, "SELECT c.id AS cid, c.published_rev AS rid, r.title, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
+    return db::query($c, "SELECT c.id AS cid, c.published_rev AS rid, r.title, r.body_html, r.fields_json FROM content c JOIN revisions r ON r.id = c.published_rev WHERE c.type = 'product' AND c.slug = ? AND c.published_rev > 0", [$slug]);
 }
 // Bir varyantın stoğu (stok tanımsız/boş → -1 = sınırsız).
 function variant_stock($variant) {
@@ -99,7 +99,9 @@ function variant_stock_decrement($c, $slug, $sku, $qty) {
             $pn = type::to_int($ps) - $qty;
             if ($pn < 0) { $pn = 0; }
             $pvals["stok"] = "" . $pn;
-            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = NULL WHERE id = ?", [json::encode($pvals), $prow["rid"]]);   // metin değişti → arama yeniden hesaplar
+            // Arama metni aynı UPDATE'te yeniden hesaplanır (src/search_text.lk) — arama isteği yazmasın.
+            $pj = json::encode($pvals);
+            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = ? WHERE id = ?", [$pj, search_norm_of($prow["title"], $prow["body_html"], $pj), $prow["rid"]]);
         }
         return;
     }
@@ -119,7 +121,8 @@ function variant_stock_decrement($c, $slug, $sku, $qty) {
         }
         if ($changed) {
             $vals["varyantlar"] = json::encode($new);
-            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = NULL WHERE id = ?", [json::encode($vals), $row["rid"]]);   // metin değişti → arama yeniden hesaplar
+            $vj = json::encode($vals);
+            db::exec($c, "UPDATE revisions SET fields_json = ?, search_norm = ? WHERE id = ?", [$vj, search_norm_of($row["title"], $row["body_html"], $vj), $row["rid"]]);
         }
     }
 }
