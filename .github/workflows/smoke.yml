@@ -1,7 +1,8 @@
 name: smoke
-# Boots the LookPress Docker stack and runs the end-to-end smoke suite on every
-# push / PR — the critical flows (public, multilingual, SEO, commerce, admin/RBAC)
-# must stay green.
+# Builds the LookPress image and runs it on SQLite, MySQL 8 and PostgreSQL 16 on every push /
+# PR: setup, the end-to-end smoke suite (public, multilingual, SEO, commerce, admin/RBAC,
+# search), the search-matching test, then a restart and a setup that stopped half way — after
+# each the smoke suite must pass again.
 on:
   push:
     branches: [ main ]
@@ -10,19 +11,79 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [ sqlite, mysql, postgres ]
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: root-ci
+          MYSQL_USER: lp
+          MYSQL_PASSWORD: lp-ci
+        ports: [ "3306:3306" ]
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -proot-ci"
+          --health-interval=5s --health-timeout=5s --health-retries=40
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lp
+          POSTGRES_PASSWORD: lp-ci
+          POSTGRES_DB: cms
+        ports: [ "5432:5432" ]
+        options: >-
+          --health-cmd="pg_isready -U lp"
+          --health-interval=5s --health-timeout=5s --health-retries=40
     steps:
       - uses: actions/checkout@v4
-      - name: Build & start LookPress
-        run: docker compose up --build -d
-      - name: Wait for the app
+
+      - name: Pick the database
         run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8080/ >/dev/null 2>&1; then echo "up"; exit 0; fi
-            sleep 2
-          done
-          echo "app did not come up"; docker compose logs; exit 1
+          case "${{ matrix.db }}" in
+            sqlite)   echo "DSN=sqlite:///data/cms.db" >> "$GITHUB_ENV" ;;
+            mysql)    echo "DSN=mysql://lp:lp-ci@127.0.0.1:3306/cms" >> "$GITHUB_ENV" ;;
+            postgres) echo "DSN=postgres://lp:lp-ci@127.0.0.1:5432/cms" >> "$GITHUB_ENV" ;;
+          esac
+
+      # The harder case on purpose: a database whose default character set is latin1 (MySQL 5.7,
+      # MariaDB and many hosting panels). LookPress must state utf8mb4 on its own tables.
+      - name: MySQL database with a latin1 default
+        if: matrix.db == 'mysql'
+        run: |
+          docker exec ${{ job.services.mysql.id }} mysql -uroot -proot-ci \
+            -e "CREATE DATABASE cms CHARACTER SET latin1; GRANT ALL ON cms.* TO 'lp'@'%';"
+
+      - name: Build the image
+        run: docker build -t lookpress:ci .
+
+      - name: Start LookPress (setup runs in the entrypoint)
+        run: |
+          docker run -d --name lp --network host \
+            -e DB_DSN="$DSN" -e ADMIN_PASSWORD=lookpress-dev -e LOOKPRESS_SEED=1 \
+            -e LOOK_SESSION_SECURE=0 lookpress:ci
+          bash test/ci_wait.sh http://localhost:7400 lp
+
       - name: Smoke suite
-        run: bash test/smoke.sh http://localhost:8080
+        run: bash test/smoke.sh http://localhost:7400
+
+      - name: Search matching (folding + LIKE escaping on this database)
+        run: docker exec lp lk search_db_test.lk
+
+      - name: Restart (every setup step runs again) + smoke suite
+        run: |
+          docker restart lp
+          bash test/ci_wait.sh http://localhost:7400 lp
+          bash test/smoke.sh http://localhost:7400
+
+      - name: Setup that stopped half way, run again + smoke suite
+        run: |
+          docker exec lp lk test/forget_migrations.lk
+          docker restart lp
+          bash test/ci_wait.sh http://localhost:7400 lp
+          bash test/smoke.sh http://localhost:7400
+
       - name: Logs on failure
         if: failure()
-        run: docker compose logs
+        run: docker logs lp

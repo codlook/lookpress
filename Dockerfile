@@ -1,6 +1,6 @@
 # LookPress dev image — pure LOOK on the published LOOK runtime (no core changes).
 # Base carries lk / lk-fcgi / lk-cgi and runs as the unprivileged user `look`.
-FROM codlook/look:1.0.0
+FROM codlook/look:1.0.30
 
 USER root
 WORKDIR /app

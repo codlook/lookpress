@@ -1,0 +1,9 @@
+// test/forget_migrations.lk — imitates a setup that stopped between its DDL and the tracking
+// rows: every migration record is dropped while the tables stay. The next setup must notice
+// what is already in place and finish without errors (CI runs setup + the smoke suite after it).
+// Run inside the app directory: DB_DSN=... lk test/forget_migrations.lk
+use db;
+
+$c = db::connect(env("DB_DSN"));
+db::exec($c, "DELETE FROM _look_migrations", []);
+print("migration records dropped");
