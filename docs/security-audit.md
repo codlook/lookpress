@@ -8,8 +8,8 @@ in `docs/cms-spec.md`, with LOOK core semantics confirmed in `look/cpp/src`
 quotes the lines it rests on. Items that could not be settled by reading are marked
 **needs runtime verification** with the exact test.
 
-Engine note: the deployed configuration runs with `LOOK_BYTECODE=0` (tree-walk
-interpreter). Route parameters are URL-decoded there (`interpreter.cpp:2039`:
+Engine note: at the time of this audit the deployed configuration ran with
+`LOOK_BYTECODE=0` (tree-walk interpreter); it now runs on the VM. Route parameters are URL-decoded there (`interpreter.cpp:2039`:
 `route_params[...] = WebContext::url_decode(match[pi+1].str(), false)`), which matters
 for LP-04.
 

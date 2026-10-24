@@ -68,6 +68,9 @@ jobs:
       - name: Smoke suite
         run: bash test/smoke.sh http://localhost:7400
 
+      - name: Every route runs on the VM (no interpreter fallback)
+        run: bash test/vm_check.sh lp
+
       - name: Search matching (folding + LIKE escaping on this database)
         run: docker exec lp lk search_db_test.lk
 

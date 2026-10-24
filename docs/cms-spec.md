@@ -121,6 +121,10 @@ verified on a fresh volume (`/en` canary 200, route count ≤ 70, 0 VM fallback)
 - ✅ **Backups** (pulled from Wave 3): `scripts/backup.sh` / `restore.sh` (docker or Plesk; SQLite online backup via sidecar, MySQL/Postgres dumps), `docs/ops-backup.md`.
 
 ### ⚠️ Core blocker found in Wave 2 — the LOOK 1.0 bytecode VM miscompiles LookPress at this size
+**Resolved (LOOK 1.0.2):** the cause was a register leak in the VM compiler. LookPress
+runs on the VM again; CI tests it on SQLite, MySQL and PostgreSQL with the VM on, and
+`LOOK_BYTECODE=0` has been removed from docker-compose.yml and the Plesk guide. The
+notes below are kept as history.
 With one top-level compilation unit (~69 routes + the Wave 2 modules) the VM does not
 drop routes anymore — it **miscompiles**: some handlers return an empty `200
 application/json` body (`/{a}`, `/admin/forms`, `/admin/form/{key}`) and others throw

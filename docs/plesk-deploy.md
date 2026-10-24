@@ -1,19 +1,24 @@
 # Deploying LookPress on Plesk (LOOK Language extension)
 
-This is how LookPress is deployed to a Plesk server that already has the **LOOK
-Language** extension installed (it ships the `lk` / `lk-fcgi` runtime under
-`/opt/look`, so you do **not** install LOOK separately). Reference deployment:
-`test.codlook.com`.
+This is how LookPress is deployed to a Plesk server that has the **LOOK Language**
+extension installed (it ships the `lk` / `lk-fcgi` runtime under `/opt/look`, so
+you do **not** install LOOK separately). Everything below is done from the Plesk
+panel and as the domain's own system user — no root shell and no hand-written
+systemd files. Reference deployment: `test.codlook.com`.
+
+Requires the LOOK Language extension **1.2.0 or newer** (LOOK 1.0.32+): it runs
+the service as the domain's user and loads an env file.
 
 ## How the LOOK extension serves a domain
 
-The extension does **not** serve `.lk` files like PHP. Instead, per enabled
-domain it creates a **systemd service** that runs the LOOK FastCGI server as a
-front controller, and points the domain's web server at it:
+The extension does **not** serve `.lk` files like PHP. Per domain it creates a
+**systemd service** that runs the LOOK server as a front controller, and points
+the domain's web server at it:
 
 ```
 systemd:  look-<domain-dashed>.service
-          ExecStart = /opt/look/lk-fcgi --mode http --port 9100 --workers 4 app.lk
+          User = <the domain's system user>   (owner of the document root)
+          ExecStart = /opt/look/lk-fcgi --mode http --port 9100 --workers 4 --script <docroot>/app.lk
           WorkingDirectory = <docroot>
 Apache:   vhost.conf / vhost_ssl.conf
           ProxyPass /.well-known !
@@ -27,62 +32,98 @@ execution and no static serving of source files.
 
 ## Deploy procedure
 
-From the repo, produce a clean snapshot (tracked files only) and lay it in the
-docroot:
+### 1. Upload the files
+
+From the repo, produce a clean snapshot (tracked files only):
 
 ```bash
-git archive --format=tar -o lookpress.tar HEAD
-# upload lookpress.tar to the server, then on the server:
-D=/var/www/vhosts/<parent>/<domain>
-U=<subscription-system-user>      # e.g. codlook.com_qq1ybm2crrp
-G=psacln
-
-systemctl stop look-<domain-dashed> || true
-rm -f "$D/index.lk"               # remove the extension's sample app
-tar -xf lookpress.tar -C "$D"
-mkdir -p "$D/data" "$D/uploads"   # persistent, survive redeploys
-chown -R "$U:$G" "$D"             # see "Run as the panel user" below
+git archive --format=tar.gz -o lookpress.tar.gz HEAD
 ```
 
-Configuration goes in an `EnvironmentFile` (mode `600`, owned by the panel
-user), not inline in the unit:
+Upload it to the domain's document root with the Plesk **File Manager** (it can
+extract archives) or over SFTP as the domain's user. Create the `data/` and
+`uploads/` folders — they hold the SQLite database and uploaded files and are
+kept across redeploys. Files uploaded this way are owned by the domain's user,
+which is what the service runs as.
+
+### 2. Create `.look.env`
+
+In the document root, create `.look.env` (File Manager → New file; set its
+permissions to `600`). Use one database DSN:
 
 ```ini
-# $D/.look.env
-DB_DSN=sqlite:///<docroot>/data/cms.db
-LOOK_BYTECODE=0   # VM off: the LOOK 1.0 VM miscompiles an app this size (see docs/cms-spec.md); required until the core fix lands
-ADMIN_PASSWORD=<strong-random>     # unset => admin login disabled (fail-loud)
-LOOK_SESSION_SECURE=1              # cookies Secure (site is behind TLS)
-LOOK_TRUSTED_PROXY=127.0.0.1       # honour X-Forwarded-Proto from the proxy
+# SQLite (default; the file lives in data/)
+DB_DSN=sqlite:///var/www/vhosts/<parent>/<domain>/data/cms.db
+# MySQL 8 — the database and user created in Plesk → Databases
+# DB_DSN=mysql://<db-user>:<db-password>@localhost:3306/<db-name>
+# PostgreSQL 16
+# DB_DSN=postgres://<db-user>:<db-password>@localhost:5432/<db-name>
+
+# Unset: the admin login is disabled
+ADMIN_PASSWORD=<strong-random>
+# Cookies are Secure (the site is behind TLS)
+LOOK_SESSION_SECURE=1
+# Honour X-Forwarded-Proto from the local proxy
+LOOK_TRUSTED_PROXY=127.0.0.1
 APP_URL=https://<domain>
 ```
 
-Point the service at `app.lk`, load the env file, and — importantly — run it as
-the **panel user** (drop-in override, so it survives the extension rewriting the
-main unit):
+The format is `KEY=VALUE`, one per line. A line that **starts** with `#` is a
+comment. **There are no comments at the end of a line**: in
+`LOOK_SESSION_SECURE=1   # cookies Secure` the value is `1   # cookies Secure`,
+not `1` — put the comment on its own line above. (The service log warns when a
+value contains ` #`.) Quotes around a value are removed. A password that
+contains `#` is fine as long as no space comes before the `#`.
 
-```ini
-# /etc/systemd/system/look-<domain-dashed>.service.d/override.conf
-[Service]
-User=<panel-user>
-Group=psacln
-EnvironmentFile=<docroot>/.look.env
-ExecStart=
-ExecStart=/opt/look/lk-fcgi --mode http --port 9100 --workers 4 app.lk
-```
+### 3. Add the domain in the panel
 
-Run the idempotent migrations once (as the panel user, so the DB is user-owned),
-mirroring `docker/entrypoint.sh`, then start:
+**Extensions → LOOK Language → Applications → Add**:
+
+| Field | Value |
+|---|---|
+| Domain | `<domain>` |
+| Script | `/var/www/vhosts/<parent>/<domain>/app.lk` |
+| Env file | `/var/www/vhosts/<parent>/<domain>/.look.env` |
+| Mode | HTTP |
+| Port | the one the panel suggests (e.g. `9100`) |
+
+The panel starts the service. Until the database is migrated (next step) the
+pages answer with errors; that is expected.
+
+### 4. Migrate the database
+
+Open an SSH session as the domain's user and run, in the document root, the same
+idempotent steps as `docker/entrypoint.sh`. `/opt/look/look-env` is the
+extension's env-file loader — it reads `.look.env` exactly as the service does:
 
 ```bash
-sudo -u "$U" bash -c "cd '$D' && DB_DSN=... /opt/look/lk setup.lk migrate"
-sudo -u "$U" bash -c "cd '$D' && DB_DSN=... LOOKPRESS_SEED=1 /opt/look/lk setup.lk seed"
-sudo -u "$U" bash -c "cd '$D' && DB_DSN=... ADMIN_PASSWORD=... LOOKPRESS_SEED=1 LOOKPRESS_PRESET=kurumsal /opt/look/lk setup_v2.lk"
-systemctl daemon-reload && systemctl start look-<domain-dashed>
+cd /var/www/vhosts/<parent>/<domain>
+bash /opt/look/look-env .look.env /opt/look/lk setup.lk migrate
+# demo content, first install only:
+LOOKPRESS_SEED=1 bash /opt/look/look-env .look.env /opt/look/lk setup.lk seed
+LOOKPRESS_SEED=1 LOOKPRESS_PRESET=kurumsal bash /opt/look/look-env .look.env /opt/look/lk setup_v2.lk
 ```
 
-Verify: `curl -s localhost:9100/` and `curl -sk https://<domain>/` should both
-return `200`; the journal should show `VM modu aktif` and `48 route`.
+Without demo content, run `bash /opt/look/look-env .look.env /opt/look/lk setup_v2.lk`
+instead of the last two lines.
+
+The user's shell must be able to see `/opt/look`: in Plesk → Websites & Domains →
+**SSH Access**, choose `/bin/bash`. The chrooted shell (`/bin/bash (chrooted)`) does
+not contain `/opt/look`, so `lk` is not found there.
+
+Then press **Restart** on the domain in the panel.
+
+### 5. Verify
+
+`https://<domain>/` returns `200`, and the panel's **Logs** for the domain show
+`Listening on port 9100` and `VM dispatch ready — <n> route`, with no
+`VM setup error` line.
+
+### Updating
+
+Upload the new snapshot over the old files (keep `data/`, `uploads/` and
+`.look.env`), run step 4's `migrate` and `setup_v2.lk` lines again (they are
+idempotent), and press **Restart**.
 
 ## Troubleshooting: "I can't delete a file/folder in the site"
 
@@ -91,10 +132,10 @@ deleted from the Plesk File Manager or over FTP — "permission denied" — even
 though it is your own site.
 
 **Why.** File Manager and FTP act as the subscription's **system user** (e.g.
-`codlook.com_qq1ybm2crrp`). If a LOOK service ran as **root** (the extension's
-generated unit has no `User=`, so it defaults to root), every file the app
-created — its log directory, its SQLite DB, uploads — is owned by `root:root`.
-On `test.codlook.com` the leftover was:
+`codlook.com_qq1ybm2crrp`). Extension versions before 1.2.0 ran the LOOK service
+as **root** (their generated unit had no `User=`), so every file the app created
+— its log directory, its SQLite DB, uploads — is owned by `root:root`. On
+`test.codlook.com` the leftover was:
 
 ```
 docroot        owner = codlook.com_qq1ybm2crrp : psaserv  (drwxr-x---)
@@ -104,23 +145,16 @@ docroot/logs/look-2026-09-24.log  owner = root : root
 
 To delete a directory you need write+execute on it; the `logs/` directory is
 mode `755` owned by `root`, so **only root can create/delete entries inside it**.
-The panel user cannot unlink the root-owned log file, so `rm -rf logs` fails, and
-the folder can't be removed from the panel. This is a leftover from an earlier
-LOOK app that ran as root.
 
-**Fix (as root).**
+**Fix.** Update the extension to 1.2.0+ and press **Restart** on the domain: the
+service is rewritten to run as the domain's user, and the restart output says how
+many files in the docroot are still owned by root. A server administrator gives
+them back once:
 
 ```bash
-rm -rf /var/www/vhosts/<parent>/<domain>/logs
+chown -R <panel-user>:psacln /var/www/vhosts/<parent>/<domain>/logs
 ```
 
-**Prevention — run the service as the panel user, not root.** Add `User=` /
-`Group=` to the service drop-in (see the override above) and `chown -R
-<panel-user>:psacln` the docroot. Then the app writes the DB, sessions and
-uploads as the panel user, and everything stays manageable from the panel — no
-root-owned files accumulate. This is why LookPress's deploy sets `User=` and puts
-the DB under a user-owned `data/` directory.
-
-**Rule of thumb:** on Plesk, an app should run as the domain's system user. A
-service running as root inside a subscription docroot is a footgun — it produces
-files the site owner can never manage.
+**Rule of thumb:** on Plesk, an app runs as the domain's system user. A service
+running as root inside a subscription docroot produces files the site owner can
+never manage.
