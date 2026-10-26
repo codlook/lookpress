@@ -62,11 +62,20 @@ jobs:
         run: |
           docker run -d --name lp --network host \
             -e DB_DSN="$DSN" -e ADMIN_PASSWORD=lookpress-dev -e LOOKPRESS_SEED=1 \
+            -e LOOK_SECRET=ci-only-secret-0123456789abcdef0123456789 \
             -e LOOK_SESSION_SECURE=0 lookpress:ci
           bash test/ci_wait.sh http://localhost:7400 lp
 
       - name: Smoke suite
         run: bash test/smoke.sh http://localhost:7400
+
+      # CSRF in a signed cookie: visitors who never log in store nothing on the server (the token
+      # in the session made every form visit a session file); forged requests are refused.
+      - name: CSRF without server-side state
+        run: bash test/csrf_test.sh http://localhost:7400 lp
+
+      - name: Changing LOOK_SECRET keeps open forms working (LOOK_SECRET_PREVIOUS)
+        run: bash test/csrf_rotation_test.sh lookpress:ci
 
       - name: Every route runs on the VM (no interpreter fallback)
         run: bash test/vm_check.sh lp

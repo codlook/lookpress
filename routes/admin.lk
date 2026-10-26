@@ -28,7 +28,7 @@ route("POST", "/admin/login", function() {
                 if (count($rows) == 1) {
                     if (auth::verify($p, $rows[0]["password_hash"])) {
                         login_reset($lk);
-                        session::start(); session::regenerate();
+                        session::start(); session::regenerate(); csrf_rotate();   // girişten önceki CSRF anahtarı geçmesin
                         session::set("uid", "" . $rows[0]["id"]);
                         session::set("uname", $u);
                         session::set("role", $rows[0]["role"]);
@@ -41,7 +41,7 @@ route("POST", "/admin/login", function() {
     login_failed($lk);
     return response::html(admin_view("login.html", ["error" => "Kullanıcı adı ya da şifre hatalı."]));
 });
-route("POST", "/admin/logout", function() { session::start(); session::destroy(); return response::redirect("/admin/login"); });
+route("POST", "/admin/logout", function() { session::start(); session::destroy(); csrf_rotate(); return response::redirect("/admin/login"); });
 
 // Admin dashboard: core content stats + the type list. Extensions inject their own
 // stat tiles ("admin.dashboard.stats") and panels ("admin.dashboard.panels") — the

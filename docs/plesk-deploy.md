@@ -61,6 +61,10 @@ DB_DSN=sqlite:///var/www/vhosts/<parent>/<domain>/data/cms.db
 
 # Unset: the admin login is disabled
 ADMIN_PASSWORD=<strong-random>
+# Required: signs the CSRF cookie (at least 32 characters; LookPress does not start without it).
+# Generate with `openssl rand -hex 32`. Changing it: put the old value in LOOK_SECRET_PREVIOUS for a
+# while, so forms that are already open keep working.
+LOOK_SECRET=<openssl rand -hex 32>
 # Cookies are Secure (the site is behind TLS)
 LOOK_SESSION_SECURE=1
 # Honour X-Forwarded-Proto from the local proxy

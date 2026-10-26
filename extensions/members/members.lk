@@ -90,7 +90,7 @@ function member_require($c) {
     return null;
 }
 function member_login_session($id) {
-    session::start(); session::regenerate();
+    session::start(); session::regenerate(); csrf_rotate();   // girişten önceki CSRF anahtarı geçmesin
     session::set("member_id", "" . $id);
 }
 
@@ -194,7 +194,7 @@ route("POST", "/hesap/{action}", function() {
     members_init($c);
     $action = request::param("action");
     if ($action == "cikis") {
-        session::start(); session::set("member_id", ""); session::regenerate();
+        session::start(); session::set("member_id", ""); session::regenerate(); csrf_rotate();
         return response::redirect("/");
     }
     if ($action == "kayit") {

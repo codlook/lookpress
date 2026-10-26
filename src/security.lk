@@ -10,34 +10,109 @@ use cache;
 use string;
 use html;
 use type;
+use cookie;
 
 // ── CSRF ─────────────────────────────────────────────────────────────────────
-// Oturum başına bir token (32 bayt → 64 hex). Varsa yeniden kullanılır; böylece
-// aynı oturumda açık duran birden çok sekme/form birbirini geçersiz kılmaz.
-function csrf_token() {
-    session::start();
-    $t = session::get("_csrf");
-    if ($t == null || $t == "") {
-        $t = crypto::random_bytes(32);
-        session::set("_csrf", $t);
+// SUNUCUDA DURUM YOK — imzalı çift-gönderim çerezi (gorilla/csrf, OWASP "signed double-submit").
+// Eskiden anahtar OTURUMA yazılıyordu: form gören her ziyaretçi (iletişim, sepet, ödeme) sunucuda
+// bir oturum dosyası açıyordu ve çerezsiz istekler, giriş yapmadan, diski doldurabiliyordu
+// (ölçüldü: 200 ziyaret → 200 dosya). Şimdi:
+//   çerez  lp_csrf = taban . "." . HMAC(LOOK_SECRET, "csrf|" . taban)   (HTTPS'te __Host-lp_csrf)
+//   form   _csrf   = nonce . "." . HMAC(taban, nonce)   — her gösterimde farklı (BREACH)
+// Doğrulama: çerez imzası LOOK_SECRET ya da LOOK_SECRET_PREVIOUS ile geçerli, gönderilen değerin
+// MAC'i tabanla tutar, Origin varsa bu site. Girişte/çıkışta csrf_rotate(): yeni taban — girişten
+// önce ele geçirilmiş ya da dayatılmış bir anahtar girişten sonra geçmez. __Host- öneki: alt alan
+// adından çerez dayatılamaz. (Oturum kimliğine bağlamak İLK oturum yaratıldığında — sepete ilk
+// ekleme — aynı sayfadaki öteki formları bozuyordu.) AYNI ALGORİTMA LOOK 2 çekirdeğindeki csrf::.
+$csrf_memo = ["base" => ""];   // bu istekte verilen taban (cookie::get aynı istekte set edileni görmez)
+
+// İmza anahtarları: önce güncel, sonra (varsa) önceki — anahtar değişirken açık formlar 403 almasın.
+function csrf_secrets() {
+    $cur = env("LOOK_SECRET", "");
+    if (string::len("" . $cur) < 32) {
+        throw "LOOK_SECRET is not set or shorter than 32 characters. Set it (the same value on every server): CSRF tokens are signed with it.";
     }
-    return $t;
+    $prev = env("LOOK_SECRET_PREVIOUS", "");
+    if ($prev != "") { return [$cur, $prev]; }
+    return [$cur];
+}
+function csrf_cookie_name() {
+    if (is_https_request()) { return "__Host-lp_csrf"; }
+    return "lp_csrf";
+}
+function csrf_sign($base, $secret) { return crypto::hmac_sha256("csrf|" . $base, $secret); }
+// Çerezdeki taban: imzası verilen anahtarlardan biriyle geçerliyse taban, değilse "".
+// $which: 0 = yalnız güncel anahtar, 1 = önceki de olur.
+function csrf_cookie_base($which) {
+    $c = cookie::get(csrf_cookie_name());
+    if ($c == null) { return ""; }
+    $p = string::split("" . $c, ".");
+    if (count($p) != 2) { return ""; }
+    if ($p[0] == "" || $p[1] == "") { return ""; }
+    $keys = csrf_secrets();
+    $i = 0;
+    while ($i < count($keys)) {
+        if ($i > $which) { return ""; }
+        if (crypto::constant_compare("" . $p[1], csrf_sign($p[0], $keys[$i]))) { return "" . $p[0]; }
+        $i = $i + 1;
+    }
+    return "";
+}
+function csrf_set_cookie($base) {
+    cookie::set(csrf_cookie_name(), $base . "." . csrf_sign($base, csrf_secrets()[0]), ["secure" => is_https_request()]);
+    $csrf_memo["base"] = $base;
+}
+// Bu isteğin tabanı: geçerli çerez varsa o (önceki anahtarla imzalıysa güncel anahtarla yeniden
+// imzalanır), yoksa yeni taban + çerez. Bir istekte hep aynı taban.
+function csrf_base() {
+    if ($csrf_memo["base"] != "") { return $csrf_memo["base"]; }
+    $base = csrf_cookie_base(0);
+    if ($base != "") { $csrf_memo["base"] = $base; return $base; }
+    $base = csrf_cookie_base(1);
+    if ($base == "") { $base = crypto::random_bytes(32); }
+    csrf_set_cookie($base);
+    return $base;
+}
+// Girişte ve çıkışta (session::regenerate ile birlikte): yeni taban.
+function csrf_rotate() { csrf_set_cookie(crypto::random_bytes(32)); }
+// Forma/başlığa konan değer: her gösterimde yeni nonce.
+function csrf_token() {
+    $base = csrf_base();
+    $nonce = crypto::random_bytes(16);
+    return $nonce . "." . crypto::hmac_sha256($nonce, $base);
 }
 // Formların içine gömülecek gizli alan (değer html::escape ile kaçırılır).
 function csrf_field() {
     return "<input type=\"hidden\" name=\"_csrf\" value=\"" . html::escape(csrf_token()) . "\">";
 }
-// Gönderilen token'ı oturumdakiyle karşılaştır. Kaynak sırası: POST alanı `_csrf`
-// (klasik form + multipart) → `X-CSRF-Token` başlığı (fetch/AJAX yükleyici).
-// Oturumda token yoksa (form hiç render edilmemiş) reddet — "boş == boş" kabul yok.
+// Origin başlığı varsa bu siteden mi: Host ya da (ters vekil arkasında) X-Forwarded-Host.
+function csrf_origin_ok() {
+    $o = request::header("Origin");
+    if ($o == null || $o == "") { return true; }     // eski tarayıcı / aynı köken GET formu: yalnız anahtar
+    if ($o == "null") { return false; }              // opak köken (sandbox, data:) — bu site değil
+    $h = string::lower("" . $o);
+    $p = string::split($h, "://");
+    if (count($p) != 2) { return false; }
+    $oh = $p[1];
+    $host = request::header("Host");
+    if ($host != null) { if ($oh == string::lower("" . $host)) { return true; } }
+    $xf = request::header("X-Forwarded-Host");
+    if ($xf != null) { if ($oh == string::lower(string::trim(string::split("" . $xf, ",")[0]))) { return true; } }
+    return false;
+}
+// Gönderilen değeri doğrula. Kaynak sırası: POST alanı `_csrf` (klasik form + multipart) →
+// `X-CSRF-Token` başlığı (fetch/AJAX yükleyici). Çerez yoksa ya da imzası bozuksa reddet.
 function csrf_verify() {
-    session::start();
-    $t = session::get("_csrf");
-    if ($t == null || $t == "") { return false; }
+    if (!csrf_origin_ok()) { return false; }
+    $base = csrf_cookie_base(1);
+    if ($base == "") { return false; }
     $sent = request::post("_csrf");
     if ($sent == null || $sent == "") { $sent = request::header("X-CSRF-Token"); }
     if ($sent == null || $sent == "") { return false; }
-    return crypto::constant_compare("" . $sent, "" . $t);
+    $p = string::split("" . $sent, ".");
+    if (count($p) != 2) { return false; }
+    if ($p[0] == "") { return false; }
+    return crypto::constant_compare("" . $p[1], crypto::hmac_sha256($p[0], $base));
 }
 
 // Bu POST yolu CSRF doğrulaması ister mi? Kapsam: /admin/* (login hariç — oturum

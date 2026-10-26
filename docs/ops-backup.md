@@ -39,7 +39,7 @@ lookpress-backup-20260926-202430.tar.gz
 metadata, sessions, settings, schema-migration markers) and every uploaded file.
 
 **Not included** — keep these in your configuration management:
-`.look.env` / `.env` (secrets: `ADMIN_PASSWORD`, `DB_DSN`, `APP_URL`), the
+`.look.env` / `.env` (secrets: `ADMIN_PASSWORD`, `LOOK_SECRET`, `DB_DSN`, `APP_URL`), the
 application source (it is in git; `manifest.json` records the commit so you can
 check out the matching code), `logs/`, `.look_cache/` bytecode caches, TLS
 certificates, the web-server/systemd/Plesk configuration, and the MySQL/Postgres

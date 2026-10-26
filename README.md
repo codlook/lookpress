@@ -48,6 +48,10 @@ at **/admin** (user `admin`, password from `ADMIN_PASSWORD` — the compose dev 
 `lookpress-dev`; **set your own** in a `.env` for anything real). `docker compose down` stops it and
 keeps the data; `down -v` resets to the clean demo.
 
+`LOOK_SECRET` is required too: it signs the CSRF cookie (at least 32 characters, the same on every
+server; `openssl rand -hex 32`). Visitors who never log in store nothing on the server — the CSRF
+token is in that signed cookie, not in a session.
+
 SQLite by default (no DB server for dev). Point `DB_DSN` at `mysql://…` (MySQL 8) or
 `postgres://…` (PostgreSQL 16) for a real database; CI installs and tests LookPress on all three.
 On MySQL, LookPress creates its tables as utf8mb4 even when the database's default is latin1.

@@ -89,7 +89,7 @@ echo "-- search (Turkish letters, LIKE metacharacters) --"
 # Fixture pages are created through the admin form (the real write path); a run
 # suffix keeps slugs and titles unique, so the suite can run twice on one database.
 S="$$$(date +%s)"
-ADMIN_TOKEN="$(body -b "$EJAR" "$BASE/admin/type/page/new" | grep -o '<meta name="csrf" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//')"
+ADMIN_TOKEN="$(body -c "$EJAR" -b "$EJAR" "$BASE/admin/type/page/new" | grep -o '<meta name="csrf" content="[^"]*"' | head -1 | sed 's/.*content="//; s/"$//')"
 savepage() {   # savepage PATH STATUS SLUG TITLE [curl args...] — through the admin form
   local path="$1" st="$2" slug="$3" title="$4"; shift 4
   code_is "page '$title' saved ($st)" "$path" 302 -b "$EJAR" -X POST --data-urlencode "_csrf=$ADMIN_TOKEN" \
