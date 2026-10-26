@@ -33,17 +33,7 @@ use html;
 use log;
 use auth;
 
-// Fail-loud on an unset admin password (philosophy: nothing hidden). Login is
-// disabled until ADMIN_PASSWORD is set — no silent "changeme" backdoor ships.
-if (env("ADMIN_PASSWORD", "") == "") {
-    log::warn("ADMIN_PASSWORD is not set — /admin login is DISABLED. Set ADMIN_PASSWORD to enable it.");
-}
-
 // ── configuration (constants the whole app agrees on) ────────────────────────
-// A well-known development password must never reach an exposed instance (audit LP-09).
-if (env("ADMIN_PASSWORD", "") == "lookpress-dev") {
-    log::warn("ADMIN_PASSWORD is the well-known development value. Change it before exposing this instance.");
-}
 use "config/config.lk";
 use "lib/sqlport.lk";  // sürücüye duyarlı DDL (eklentilerin çalışma-zamanı tabloları)
 

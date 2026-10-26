@@ -59,7 +59,9 @@ DB_DSN=sqlite:///var/www/vhosts/<parent>/<domain>/data/cms.db
 # PostgreSQL 16
 # DB_DSN=postgres://<db-user>:<db-password>@localhost:5432/<db-name>
 
-# Unset: the admin login is disabled
+# Used ONCE: the setup creates the first admin (username `admin`) with it when no user exists.
+# Login always checks the database; this value does not change an existing admin's password.
+# After the first setup, change the password in /admin/users and delete this line.
 ADMIN_PASSWORD=<strong-random>
 # Required: signs the CSRF cookie (at least 32 characters; LookPress does not start without it).
 # Generate with `openssl rand -hex 32`. Changing it: put the old value in LOOK_SECRET_PREVIOUS for a

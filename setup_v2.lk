@@ -238,6 +238,21 @@ if (count($has_user) == 0) {
         print("=== seeded admin user (username: admin) ===\n");
     }
 }
+// Uyarılar GERÇEĞE bakar (eskiden app.lk ortam değerine bakıyordu: değer silinince "giriş devre
+// dışı" diyordu — doğru değil — ve veritabanındaki şifre bilinen geliştirme değeri kalsa susuyordu).
+if (count(db::query($c, "SELECT id FROM users LIMIT 1", [])) == 0) {
+    print("WARNING: no admin user exists: set ADMIN_PASSWORD and run this setup again to create the first admin (username: admin).\n");
+} else {
+    $adm = db::query($c, "SELECT password_hash FROM users WHERE username = 'admin'", []);
+    if (count($adm) > 0) {
+        if (auth::verify("lookpress-dev", $adm[0]["password_hash"])) {   // audit LP-09
+            print("WARNING: the admin account still uses the well-known development password. Change it in /admin/users before exposing this instance.\n");
+        }
+    }
+    if (env("ADMIN_PASSWORD", "") != "") {
+        print("NOTE: ADMIN_PASSWORD is used only to create the first admin; it does not change an existing admin's password. You can remove it from the environment file.\n");
+    }
+}
 
 // ── demo content (opt-in: LOOKPRESS_SEED=1, once) — a populated first run and the
 // fixtures the smoke suite asserts (a tr + en product under the same slug). ──────

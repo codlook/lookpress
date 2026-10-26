@@ -45,7 +45,9 @@ docker compose up            # http://localhost:8080
 
 That gives you a populated demo: a shop with products (tr + en), a blog, pages, and a working admin
 at **/admin** (user `admin`, password from `ADMIN_PASSWORD` — the compose dev default is
-`lookpress-dev`; **set your own** in a `.env` for anything real). `docker compose down` stops it and
+`lookpress-dev`; **set your own** in a `.env` for anything real). `ADMIN_PASSWORD` is used once,
+to create the first admin; afterwards the password lives in the database — change it in
+/admin/users, and remove the variable from production environment files. `docker compose down` stops it and
 keeps the data; `down -v` resets to the clean demo.
 
 `LOOK_SECRET` is required too: it signs the CSRF cookie (at least 32 characters, the same on every
