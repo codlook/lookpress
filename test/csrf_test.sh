@@ -49,6 +49,16 @@ sed -E 's/(lp_csrf\t[^.]*\.)./\10/' "$T/a" > "$T/forged"
 c=$(post "$T/forged" "$TA");                [ "$c" = 403 ] && ok "a cookie with a changed signature: 403" || bad "a forged cookie: $c"
 c=$(post "$T/a" "$TA" -H "Origin: https://evil.example"); [ "$c" = 403 ] && ok "a cross-site Origin: 403" || bad "a cross-site Origin: $c"
 
+echo "-- proxy headers count only behind a trusted proxy (LOOK_TRUSTED_PROXY unset here) --"
+# X-Forwarded-Host / X-Forwarded-Proto are believed only when LOOK_TRUSTED_PROXY is set — the rule
+# LOOK applies to its own session cookie. Without it a request can claim any host or scheme.
+c=$(post "$T/a" "$TA" -H "Origin: https://evil.example" -H "X-Forwarded-Host: evil.example")
+[ "$c" = 403 ] && ok "a cross-site Origin with a matching X-Forwarded-Host: 403" || bad "X-Forwarded-Host believed without a trusted proxy: $c"
+h=$(curl -s -D - -o /dev/null -H "X-Forwarded-Proto: https" "$BASE/contact")
+if echo "$h" | grep -qi "^set-cookie: lp_csrf=" && ! echo "$h" | grep -qi "strict-transport-security"; then
+    ok "X-Forwarded-Proto: https is not believed (cookie lp_csrf, no HSTS)"
+else bad "X-Forwarded-Proto believed without a trusted proxy: $(echo "$h" | grep -iE 'set-cookie: (__Host-)?lp_csrf|strict-transport' | tr -d '\r' | tr '\n' ' ')"; fi
+
 echo "-- sessions --"
 # Aynı sayfadaki ikinci form: sepete ilk ekleme oturumu yaratır, sayfanın öbür formları çalışmaya
 # devam etmeli (anahtar oturum kimliğine bağlıyken 403 alıyorlardı).

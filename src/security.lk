@@ -85,7 +85,7 @@ function csrf_token() {
 function csrf_field() {
     return "<input type=\"hidden\" name=\"_csrf\" value=\"" . html::escape(csrf_token()) . "\">";
 }
-// Origin başlığı varsa bu siteden mi: Host ya da (ters vekil arkasında) X-Forwarded-Host.
+// Origin başlığı varsa bu siteden mi: Host ya da (yalnız güvenilen ters vekil arkasında) X-Forwarded-Host.
 function csrf_origin_ok() {
     $o = request::header("Origin");
     if ($o == null || $o == "") { return true; }     // eski tarayıcı / aynı köken GET formu: yalnız anahtar
@@ -96,6 +96,7 @@ function csrf_origin_ok() {
     $oh = $p[1];
     $host = request::header("Host");
     if ($host != null) { if ($oh == string::lower("" . $host)) { return true; } }
+    if (!behind_trusted_proxy()) { return false; }
     $xf = request::header("X-Forwarded-Host");
     if ($xf != null) { if ($oh == string::lower(string::trim(string::split("" . $xf, ",")[0]))) { return true; } }
     return false;
@@ -226,8 +227,14 @@ function login_reset($key) {
 // nihai yanıtta kalır. Route sonradan aynı adı yazarsa onunki kazanır (map).
 // HSTS: yalnız gerçek HTTPS'te. Sinyal: LOOK_SESSION_SECURE=1 ya da X-Forwarded-Proto
 // https. Başlık sahte olsa bile zararsız — tarayıcı HSTS'i düz HTTP'de yok sayar.
+// Ters vekil başlıklarına (X-Forwarded-Proto/-Host) yalnız LOOK_TRUSTED_PROXY ayarlıysa güvenilir —
+// LOOK'un kendi oturum çerezi için uyguladığı kural. Eskiden koşulsuz güveniliyordu: herhangi bir
+// istek şemayı ya da ana bilgisayarı kendisi seçebiliyordu. (LOOK çekirdeği bağlanan adresin
+// listede olup olmadığına da bakar; uygulama kodu o adresi göremediği için burada ayarın varlığı.)
+function behind_trusted_proxy() { return env("LOOK_TRUSTED_PROXY", "") != ""; }
 function is_https_request() {
     if (env("LOOK_SESSION_SECURE", "") == "1") { return true; }
+    if (!behind_trusted_proxy()) { return false; }
     $xf = request::header("X-Forwarded-Proto");
     if ($xf == null) { return false; }
     return string::starts_with(string::lower(string::trim($xf)), "https");
