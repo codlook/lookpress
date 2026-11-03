@@ -72,6 +72,9 @@ jobs:
       - name: Smoke suite
         run: bash test/smoke.sh http://localhost:7400
 
+      - name: Every POST form carries a CSRF token (LOOK 2 refuses a form without one)
+        run: python3 test/forms_csrf_test.py http://localhost:7400 lookpress-dev
+
       # CSRF in a signed cookie: visitors who never log in store nothing on the server (the token
       # in the session made every form visit a session file); forged requests are refused.
       - name: CSRF without server-side state
