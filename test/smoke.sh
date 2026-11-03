@@ -69,7 +69,10 @@ code_is "admin without session redirects" "/admin" 302
 # failed login used to pass a word check). A good login redirects (302) and the
 # session then opens /admin itself (200); a wrong password does not redirect and
 # its session still gets the 302 to the login page.
-code_is "admin login redirects"           "/admin/login" 302 -c "$EJAR" -b "$EJAR" -X POST -d "username=admin&password=$ADMIN_PW"
+# The login form carries the CSRF token (LOOK 2 checks every POST, the login included).
+meta_token() { body -c "$1" -b "$1" "$BASE/admin/login" | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//'; }
+LTOK="$(meta_token "$EJAR")"
+code_is "admin login redirects"           "/admin/login" 302 -c "$EJAR" -b "$EJAR" -X POST --data-urlencode "_csrf=$LTOK" -d "username=admin&password=$ADMIN_PW"
 code_is "admin session opens dashboard"   "/admin" 200 -b "$EJAR"
 code_is "admin sees users"                "/admin/users" 200 -b "$EJAR"
 code_is "admin sees orders"               "/admin/orders" 200 -b "$EJAR"
@@ -82,7 +85,8 @@ if body -b "$EJAR" "$BASE/admin/type/product?f_category=giyim" | grep -q 'KÄ±rmÄ
 # The order placed above shows in the dashboard's revenue (a failed sum used to read as 0).
 REV="$(body -b "$EJAR" "$BASE/admin" | grep -o '<b>[^<]*</b> ciro' | head -1 | sed 's/<b>//; s/<\/b> ciro//')"
 if echo "$REV" | grep -q '[1-9]'; then ok "dashboard revenue counts the order ($REV)"; else bad "dashboard revenue counts the order (got '$REV')"; fi
-code_is "wrong password does not redirect" "/admin/login" 200 -c "$WJAR" -b "$WJAR" -X POST -d "username=admin&password=WRONG"
+WTOK="$(meta_token "$WJAR")"
+code_is "wrong password does not redirect" "/admin/login" 200 -c "$WJAR" -b "$WJAR" -X POST --data-urlencode "_csrf=$WTOK" -d "username=admin&password=WRONG"
 code_is "wrong password opens no session" "/admin" 302 -b "$WJAR"
 
 echo "-- search (Turkish letters, LIKE metacharacters) --"

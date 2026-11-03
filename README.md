@@ -36,7 +36,9 @@ fields. (Not "non-developers"; that label is earned only once theme customizatio
 
 ## Quick start
 
-The whole platform runs in Docker on the published LOOK runtime — no build toolchain needed:
+The whole platform runs in Docker — no build toolchain needed. On this `v2` branch the image
+first builds LOOK 2 from the `codlook/look` `v2` branch (LOOK 2 has no published runtime yet);
+`main` runs on the published LOOK 1 runtime:
 
 ```bash
 git clone https://github.com/codlook/lookpress && cd lookpress

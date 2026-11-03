@@ -5,7 +5,7 @@ name: smoke
 # each the smoke suite must pass again.
 on:
   push:
-    branches: [ main ]
+    branches: [ main, v2 ]
   pull_request:
 
 jobs:
@@ -55,7 +55,7 @@ jobs:
           docker exec ${{ job.services.mysql.id }} mysql -uroot -proot-ci \
             -e "CREATE DATABASE cms CHARACTER SET latin1; GRANT ALL ON cms.* TO 'lp'@'%';"
 
-      - name: Build the image
+      - name: Build the image (on v2 the Dockerfile builds LOOK 2 from the codlook/look v2 branch)
         run: docker build -t lookpress:ci .
 
       - name: Start LookPress (setup runs in the entrypoint)

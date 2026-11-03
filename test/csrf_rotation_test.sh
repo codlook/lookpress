@@ -22,7 +22,7 @@ post() {   # post <port> <jar> <token> → status
 up lprotA 7451 -e LOOK_SECRET=$OLD
 curl -s -c "$T/j" -o "$T/f.html" "http://localhost:7451/contact"
 tok=$(grep -o 'name="_csrf" value="[^"]*"' "$T/f.html" | head -1 | sed 's/.*value="//; s/"$//')
-old_cookie=$(awk '/lp_csrf/{print $7}' "$T/j")
+old_cookie=$(awk '/look_csrf/{print $7}' "$T/j")
 [ -n "$tok" ] && [ -n "$old_cookie" ] && ok "a form and its cookie under the old secret" || bad "no form/cookie under the old secret"
 
 up lprotB 7452 -e LOOK_SECRET=$NEW
@@ -33,7 +33,7 @@ up lprotB 7452 -e LOOK_SECRET=$NEW -e LOOK_SECRET_PREVIOUS=$OLD
 cp "$T/j" "$T/j2"
 c=$(post 7452 "$T/j2" "$tok"); [ "$c" != 403 ] && ok "with LOOK_SECRET_PREVIOUS the open form still works ($c)" || bad "with LOOK_SECRET_PREVIOUS: 403"
 curl -s -b "$T/j2" -c "$T/j2" -o /dev/null "http://localhost:7452/contact"
-new_cookie=$(awk '/lp_csrf/{print $7}' "$T/j2")
+new_cookie=$(awk '/look_csrf/{print $7}' "$T/j2")
 [ -n "$new_cookie" ] && [ "${new_cookie%%.*}" = "${old_cookie%%.*}" ] && [ "$new_cookie" != "$old_cookie" ] \
     && ok "the cookie is signed again with the new secret (same base)" || bad "the cookie was not re-signed ('$old_cookie' → '$new_cookie')"
 
