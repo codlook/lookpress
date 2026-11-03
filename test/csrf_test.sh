@@ -42,10 +42,14 @@ c=$(post "$T/a" "$TA2"); [ "$c" != 403 ] && ok "an older render's value is accep
 echo "-- forged requests are refused --"
 c=$(post "$T/a" -);                         [ "$c" = 403 ] && ok "no token: 403" || bad "no token: $c"
 c=$(post - "$TA");                          [ "$c" = 403 ] && ok "no cookie: 403" || bad "no cookie: $c"
-c=$(post "$T/a" "${TA%?}0");                [ "$c" = 403 ] && ok "a changed token: 403" || bad "a changed token: $c"
+# Change the last character for sure (replacing it with "0" was no change one time in 16).
+flip() { local s="$1" l="${1: -1}"; [ "$l" = 0 ] && echo "${s%?}1" || echo "${s%?}0"; }
+c=$(post "$T/a" "$(flip "$TA")");           [ "$c" = 403 ] && ok "a changed token: 403" || bad "a changed token: $c"
 curl -s -c "$T/b" -b "$T/b" -o "$T/b.html" "$BASE/contact"; TB=$(token_of "$T/b.html")
 c=$(post "$T/a" "$TB");                     [ "$c" = 403 ] && ok "another visitor's token: 403" || bad "another visitor's token: $c"
-sed -E 's/(lp_csrf\t[^.]*\.)./\10/' "$T/a" > "$T/forged"
+# First character of the cookie's signature, changed for sure (0 → 1, anything else → 0).
+sed -E 's/(lp_csrf\t[^.]*\.)0/\1X/; s/(lp_csrf\t[^.]*\.)[^X]/\10/; s/(lp_csrf\t[^.]*\.)X/\11/' "$T/a" > "$T/forged"
+cmp -s "$T/a" "$T/forged" && bad "the forged cookie is the same as the real one"
 c=$(post "$T/forged" "$TA");                [ "$c" = 403 ] && ok "a cookie with a changed signature: 403" || bad "a forged cookie: $c"
 c=$(post "$T/a" "$TA" -H "Origin: https://evil.example"); [ "$c" = 403 ] && ok "a cross-site Origin: 403" || bad "a cross-site Origin: $c"
 
