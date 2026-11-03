@@ -7,6 +7,9 @@ on:
   push:
     branches: [ main, v2 ]
   pull_request:
+  # Called every day from main (v2-daily.yml): on v2 the image builds LOOK 2 from the latest
+  # codlook/look v2, so a LOOK change that breaks LookPress shows up within a day.
+  workflow_call:
 
 jobs:
   smoke:
