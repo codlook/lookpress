@@ -1,0 +1,13 @@
+name: v2-daily
+# LookPress's v2 branch runs on LOOK 2, built from the latest codlook/look v2. Its CI runs when
+# LookPress changes; this runs it every day as well, so a change in LOOK that breaks LookPress is
+# noticed within a day — without tying LOOK's own CI to LookPress. (Scheduled workflows run only
+# on the default branch, so this file lives on main and calls the v2 branch's workflow.)
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  smoke-v2:
+    uses: codlook/lookpress/.github/workflows/smoke.yml@v2
