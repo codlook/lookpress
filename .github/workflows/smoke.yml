@@ -7,7 +7,7 @@ on:
   push:
     branches: [ main, v2 ]
   pull_request:
-  # Called every day from main (v2-daily.yml): on v2 the image builds LOOK 2 from the latest
+  # Called every day from main (v2-daily.yml): on v2 the image builds LOOK from the latest
   # codlook/look v2, so a LOOK change that breaks LookPress shows up within a day.
   workflow_call:
 
@@ -58,7 +58,7 @@ jobs:
           docker exec ${{ job.services.mysql.id }} mysql -uroot -proot-ci \
             -e "CREATE DATABASE cms CHARACTER SET latin1; GRANT ALL ON cms.* TO 'lp'@'%';"
 
-      - name: Build the image (on v2 the Dockerfile builds LOOK 2 from the codlook/look v2 branch)
+      - name: Build the image (on v2 the Dockerfile builds LOOK from the codlook/look v2 branch)
         run: docker build -t lookpress:ci .
 
       - name: Start LookPress (setup runs in the entrypoint)
@@ -72,7 +72,7 @@ jobs:
       - name: Smoke suite
         run: bash test/smoke.sh http://localhost:7400
 
-      - name: Every POST form carries a CSRF token (LOOK 2 refuses a form without one)
+      - name: Every POST form carries a CSRF token (LOOK refuses a form without one)
         run: python3 test/forms_csrf_test.py http://localhost:7400 lookpress-dev
 
       # CSRF in a signed cookie: visitors who never log in store nothing on the server (the token

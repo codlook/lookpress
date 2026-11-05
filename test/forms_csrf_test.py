@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# Every POST form LookPress renders carries a CSRF token (LOOK 2 checks every POST of an app that
-# uses cookies; a form without the token gets 403). Found by running LookPress on LOOK 2: the admin
+# Every POST form LookPress renders carries a CSRF token (LOOK checks every POST of an app that
+# uses cookies; a form without the token gets 403). Found by running LookPress on the current LOOK: the admin
 # login form used the "auth" layout, which has no token script, so no admin could log in.
 # Usage: forms_csrf_test.py <base url> <admin password>   (run after smoke.sh, which places an order)
 # LookPress v2: her sayfadaki her POST formu CSRF anahtarı taşıyor mu? (çalışma anında, gerçek HTML)

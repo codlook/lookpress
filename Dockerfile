@@ -1,6 +1,6 @@
-# LookPress dev image on LOOK 2 — pure LOOK, built against the LOOK `v2` branch.
-# LOOK 2 has no published runtime image yet, so the first stage builds lk / lk-fcgi from source
-# (LOOK_REF picks the branch or tag). On `main` LookPress runs on the published LOOK 1 image.
+# LookPress dev image — pure LOOK, built against the LOOK `v2` branch.
+# That branch has no published runtime image yet, so the first stage builds lk / lk-fcgi from source
+# (LOOK_REF picks the branch or tag). On `main` LookPress runs on the published LOOK image (1.0.x).
 ARG LOOK_REF=v2
 
 FROM ubuntu:24.04 AS look

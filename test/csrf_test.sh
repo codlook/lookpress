@@ -5,7 +5,7 @@
 # created a session file on the server, and nothing ever removed it — requests without a cookie
 # could fill the disk without logging in. Now the token is kept in a signed cookie
 # (look_csrf = base.HMAC(LOOK_SECRET, "csrf|" . base)), the form carries a per-render value
-# (nonce.HMAC(base, nonce)), and nothing is stored for the visitor. On LOOK 2 the check itself is
+# (nonce.HMAC(base, nonce)), and nothing is stored for the visitor. In the current LOOK the check itself is
 # the core's (every POST of an application that uses cookies); LookPress only puts the token in
 # its forms.
 # Usage: csrf_test.sh <base url> <container>   (the app runs in a Docker container, as in CI)

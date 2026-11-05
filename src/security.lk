@@ -13,10 +13,10 @@ use type;
 use cookie;
 
 // ── CSRF ─────────────────────────────────────────────────────────────────────
-// LOOK 2: koruma ÇEKİRDEKTE ve varsayılan açık — çerez kullanan her uygulamada her POST/PUT/
+// LOOK (v2 dalı): koruma ÇEKİRDEKTE ve varsayılan açık — çerez kullanan her uygulamada her POST/PUT/
 // PATCH/DELETE rotadan ve before_route'tan ÖNCE denetlenir (imzalı çift-gönderim çerezi
 // look_csrf / __Host-look_csrf, LOOK_SECRET; giriş/çıkışta session::regenerate/destroy yeni
-// taban verir). LookPress yalnız anahtarı forma ve <meta>'ya koyar. (LOOK 1'de aynı algoritma
+// taban verir). LookPress yalnız anahtarı forma ve <meta>'ya koyar. (1.0.x'te aynı algoritma
 // burada saf LOOK ile yazılıydı — lp_csrf çerezi; main dalında duruyor.)
 function csrf_token() { return csrf::token(); }
 function csrf_field() { return csrf::field(); }

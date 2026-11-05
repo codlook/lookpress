@@ -69,7 +69,7 @@ code_is "admin without session redirects" "/admin" 302
 # failed login used to pass a word check). A good login redirects (302) and the
 # session then opens /admin itself (200); a wrong password does not redirect and
 # its session still gets the 302 to the login page.
-# The login form carries the CSRF token (LOOK 2 checks every POST, the login included).
+# The login form carries the CSRF token (LOOK checks every POST, the login included).
 meta_token() { body -c "$1" -b "$1" "$BASE/admin/login" | grep -o 'name="_csrf" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//'; }
 LTOK="$(meta_token "$EJAR")"
 code_is "admin login redirects"           "/admin/login" 302 -c "$EJAR" -b "$EJAR" -X POST --data-urlencode "_csrf=$LTOK" -d "username=admin&password=$ADMIN_PW"
