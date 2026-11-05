@@ -23,7 +23,7 @@ use cookie;
 // MAC'i tabanla tutar, Origin varsa bu site. Girişte/çıkışta csrf_rotate(): yeni taban — girişten
 // önce ele geçirilmiş ya da dayatılmış bir anahtar girişten sonra geçmez. __Host- öneki: alt alan
 // adından çerez dayatılamaz. (Oturum kimliğine bağlamak İLK oturum yaratıldığında — sepete ilk
-// ekleme — aynı sayfadaki öteki formları bozuyordu.) AYNI ALGORİTMA LOOK 2 çekirdeğindeki csrf::.
+// ekleme — aynı sayfadaki öteki formları bozuyordu.) AYNI ALGORİTMA LOOK çekirdeğindeki (v2 dalı) csrf::.
 $csrf_memo = ["base" => ""];   // bu istekte verilen taban (cookie::get aynı istekte set edileni görmez)
 
 // İmza anahtarları: önce güncel, sonra (varsa) önceki — anahtar değişirken açık formlar 403 almasın.
